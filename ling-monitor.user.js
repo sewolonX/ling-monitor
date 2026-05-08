@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.10
+// @version 1.9.11
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -706,7 +706,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.10';
+    const SCRIPT_VERSION = '1.9.11';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1998,6 +1998,8 @@
 
     async function autoTreasureHunt() {
         const thStartTime = Date.now();
+        let startMapCount = 0;
+        try { const m = await getTreasureMapItemId(); if (m) startMapCount = m.quantity; } catch {}
         thLog('=== 开始自动寻宝 ===', 'success');
         let used = 0, encounterCount = 0, totalXiuwei = 0, totalLingshi = 0;
         const batch = config.treasureHunt.batchSize || Infinity;
@@ -2117,7 +2119,9 @@
 
         const elapsed = Math.round((Date.now() - thStartTime) / 1000);
         const em = Math.floor(elapsed / 60), es = elapsed % 60;
-        thLog(`=== 寻宝结束，共使用 ${used} 次藏宝图，遭遇 ${encounterCount} 次，获得 ${totalXiuwei} 修为 ${totalLingshi} 灵石，耗时 ${em}分${es}秒 ===`, 'success');
+        let endMapCount = 0;
+        try { const m = await getTreasureMapItemId(); if (m) endMapCount = m.quantity; } catch {}
+        thLog(`=== 寻宝结束，藏宝图 ${startMapCount} → ${endMapCount}，遭遇 ${encounterCount} 次，获得 ${totalXiuwei} 修为 ${totalLingshi} 灵石，耗时 ${em}分${es}秒 ===`, 'success');
         const medBtn = document.getElementById('meditateBtn');
         if (medBtn && !medBtn.classList.contains('meditating')) {
             medBtn.click();
@@ -2653,6 +2657,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.11</div>
+                            <div>• 新增寻宝结束日志中的藏宝图数量变化统计（开始 → 剩余）</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.10</div>
                             <div>• 移除寻宝配置面板中的商人设置区块，商人设置仅在探索 Tab 显示</div>
                         </div>
@@ -2660,15 +2668,6 @@
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.9</div>
                             <div>• 移除宗门回血功能，修复战斗后回血重复调用导致寻宝循环卡死</div>
                             <div>• 简化战斗结束信号机制，移除冗余 Promise 同步链</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.8</div>
-                            <div>• 寻宝使用物品数量支持配置，新增"每次使用数量"选项</div>
-                            <div>• 优化寻宝战斗结束判断，改为依据接口返回而非面板状态</div>
-                            <div>• 护道者优先级设置移入护道者设置区域</div>
-                            <div>• 优化配置面板布局，取消勾选时隐藏关联设置</div>
-                            <div>• 修复复选框在夜间模式下未选中状态显示异常</div>
-                            <div>• 切换到更新Tab时自动关闭配置面板</div>
                         </div>
                     </div>
                 </div>
