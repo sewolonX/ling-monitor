@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.9
+// @version 1.9.10
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -706,7 +706,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.9';
+    const SCRIPT_VERSION = '1.9.10';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -2653,6 +2653,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.10</div>
+                            <div>• 移除寻宝配置面板中的商人设置区块，商人设置仅在探索 Tab 显示</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.9</div>
                             <div>• 移除宗门回血功能，修复战斗后回血重复调用导致寻宝循环卡死</div>
                             <div>• 简化战斗结束信号机制，移除冗余 Promise 同步链</div>
@@ -2665,10 +2669,6 @@
                             <div>• 优化配置面板布局，取消勾选时隐藏关联设置</div>
                             <div>• 修复复选框在夜间模式下未选中状态显示异常</div>
                             <div>• 切换到更新Tab时自动关闭配置面板</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.7</div>
-                            <div>• 修复配置修改后收起面板未保存的问题</div>
                         </div>
                     </div>
                 </div>
@@ -3228,7 +3228,7 @@
                 </div>
             </div>`}
 
-            ${isInscription ? '' : `
+            ${(!isTreasure && !isInscription) ? `
             <div class="cfg-section">
                 <div class="cfg-section-label">商人设置</div>
                 <div class="cfg-row">
@@ -3249,7 +3249,7 @@
                     <label class="cfg-label" style="margin-bottom:0;">无匹配时买最贵</label>
                     <span class="cfg-hint">关闭则无匹配时自动婉拒</span>
                 </div>
-            </div>`}
+            </div>` : ''}
 
             ${isTreasure ? `<div class="cfg-section">
                 <div class="cfg-section-label">寻宝设置</div>
