@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.11
+// @version 1.9.12
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -706,7 +706,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.11';
+    const SCRIPT_VERSION = '1.9.12';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1596,12 +1596,15 @@
             getMasterOverview().catch(() => null),
         ]);
         if (playerInfo && playerInfo.data) {
-            if (playerInfo.data.voidBodyBuffExpire) {
-                const remain = Math.max(0, Math.round((playerInfo.data.voidBodyBuffExpire - Date.now()) / 1000));
+            const d = playerInfo.data;
+            if (d.realmStage >= 9 && d.realmLevel >= 5) {
+                logFn('渡劫五劫及以上不再获得虚空淬体加成', 'info');
+            } else if (d.voidBodyBuffExpire) {
+                const remain = Math.max(0, Math.round((d.voidBodyBuffExpire - Date.now()) / 1000));
                 const h = Math.floor(remain / 3600);
                 const m = Math.floor((remain % 3600) / 60);
                 const s = remain % 60;
-                logFn(`虚空淬体生效中，倍率 x${playerInfo.data.voidBodyBuffMultiplier}，剩余 ${h}时${m}分${s}秒`, 'success');
+                logFn(`虚空淬体生效中，倍率 x${d.voidBodyBuffMultiplier}，剩余 ${h}时${m}分${s}秒`, 'success');
             } else if (!window._origConfirm('当前没有虚空淬体加成，是否继续？')) {
                 return { ok: false };
             }
@@ -2657,17 +2660,16 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.12</div>
+                            <div>• 渡劫五劫及以上跳过虚空淬体检测，不再弹出确认框</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.11</div>
                             <div>• 新增寻宝结束日志中的藏宝图数量变化统计（开始 → 剩余）</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.10</div>
                             <div>• 移除寻宝配置面板中的商人设置区块，商人设置仅在探索 Tab 显示</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.9</div>
-                            <div>• 移除宗门回血功能，修复战斗后回血重复调用导致寻宝循环卡死</div>
-                            <div>• 简化战斗结束信号机制，移除冗余 Promise 同步链</div>
                         </div>
                     </div>
                 </div>
