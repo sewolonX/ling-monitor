@@ -16,6 +16,11 @@
 (function () {
     'use strict';
 
+    if (typeof unsafeWindow.__S === 'undefined' || !unsafeWindow.__S) {
+        console.log('[灵界助手] 盐值未获取，脚本未激活');
+        return;
+    }
+
     // --- 主题样式 ---
     GM_addStyle(`
         /* === 主题变量 (跟随页面亮暗模式) === */
@@ -130,10 +135,12 @@
             cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             padding: 0;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.3), 0 0 20px var(--mp-accent-glow);
+            border: 2px solid var(--mp-border-subtle);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+            transition: box-shadow 0.5s, border-color 0.5s;
         }
         #monitor-panel.minimized:hover {
-            box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 0 30px var(--mp-accent-dim);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
         }
         #monitor-panel.minimized::before { display: none; }
         #monitor-panel.minimized .mp-gold-line { display: none; }
@@ -152,6 +159,13 @@
             color: var(--mp-accent);
         }
         .mp-minimized-icon { display: none; }
+        #monitor-panel.minimized.running {
+            animation: mp-breathe 2s ease-in-out infinite;
+        }
+        @keyframes mp-breathe {
+            0%, 100% { box-shadow: 0 2px 12px rgba(0,0,0,0.3), 0 0 12px rgba(74,192,224,0.3), 0 0 24px rgba(74,192,224,0.1); border-color: rgba(74,192,224,0.4); }
+            50% { box-shadow: 0 2px 12px rgba(0,0,0,0.3), 0 0 24px rgba(74,192,224,0.6), 0 0 48px rgba(74,192,224,0.2); border-color: rgba(74,192,224,0.9); }
+        }
 
         /* === 头部 === */
         #monitor-header {
@@ -2124,7 +2138,7 @@
         const em = Math.floor(elapsed / 60), es = elapsed % 60;
         let endMapCount = 0;
         try { const m = await getTreasureMapItemId(); if (m) endMapCount = m.quantity; } catch {}
-        thLog(`=== 寻宝结束，藏宝图 ${startMapCount} → ${endMapCount}，遭遇 ${encounterCount} 次，获得 ${totalXiuwei} 修为 ${totalLingshi} 灵石，耗时 ${em}分${es}秒 ===`, 'success');
+        thLog(`=== 寻宝结束，藏宝图 ${startMapCount} → ${endMapCount}，共使用 ${used} 次，遭遇 ${encounterCount} 次，获得 ${totalXiuwei} 修为 ${totalLingshi} 灵石，耗时 ${em}分${es}秒 ===`, 'success');
         const medBtn = document.getElementById('meditateBtn');
         if (medBtn && !medBtn.classList.contains('meditating')) {
             medBtn.click();
@@ -2824,8 +2838,15 @@
                 if (body) body.style.display = '';
                 const configP = document.getElementById('config-panel');
                 if (configP) configP.style.display = '';
+                // 展开后滚动当前tab日志到底部
+                const activeTab = panel.querySelector('.mp-tab.active');
+                const tabName = activeTab ? activeTab.dataset.tab : 'monitor';
+                const logId = tabName === 'treasure' ? 'treasure-log' : (tabName === 'inscription' ? 'inscription-log' : 'monitor-log');
+                const logEl = document.getElementById(logId);
+                if (logEl) logEl.scrollTop = logEl.scrollHeight;
             } else {
                 panel.classList.add('minimized');
+                updateMinimizedGlow();
             }
         };
 
@@ -2833,6 +2854,17 @@
             toggleMinimize();
             e.stopPropagation();
         });
+
+        // 缩小状态呼吸光环：运行时呼吸，停止时移除
+        function updateMinimizedGlow() {
+            if (panel.classList.contains('minimized') && isRunning()) {
+                panel.classList.add('running');
+            } else {
+                panel.classList.remove('running');
+            }
+        }
+        panel.classList.remove('running');
+        setInterval(updateMinimizedGlow, 500);
 
         // 圆形图标点击展开已由 mouseup/touchend 处理
 
