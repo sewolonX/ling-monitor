@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.12
+// @version 1.9.13
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -706,7 +706,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.12';
+    const SCRIPT_VERSION = '1.9.13';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1597,8 +1597,8 @@
         ]);
         if (playerInfo && playerInfo.data) {
             const d = playerInfo.data;
-            if (d.realmStage >= 9 && d.realmLevel >= 5) {
-                logFn('渡劫五劫及以上不再获得虚空淬体加成', 'info');
+            if (d.realmStage >= 9 && d.realmLevel >= 6) {
+                logFn('渡劫六劫及以上不再获得虚空淬体加成', 'info');
             } else if (d.voidBodyBuffExpire) {
                 const remain = Math.max(0, Math.round((d.voidBodyBuffExpire - Date.now()) / 1000));
                 const h = Math.floor(remain / 3600);
