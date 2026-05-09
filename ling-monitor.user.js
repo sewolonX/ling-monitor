@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.13
+// @version 1.9.14
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -16,7 +16,8 @@
 (function () {
     'use strict';
 
-    if (typeof unsafeWindow.__S === 'undefined' || !unsafeWindow.__S) {
+    const _w = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    if (typeof _w.__S === 'undefined' || !_w.__S) {
         console.log('[灵界助手] 盐值未获取，脚本未激活');
         return;
     }
@@ -720,7 +721,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.13';
+    const SCRIPT_VERSION = '1.9.14';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -813,14 +814,14 @@
 
     function createLogFn(logElId) {
         return function (msg, type) {
-            console.log(msg);
+            const now = new Date();
+            const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+            console.log(`[${ts}] ${msg}`);
             const logEl = document.getElementById(logElId);
             if (!logEl) return;
             const line = document.createElement('div');
             const cls = type ? ` log-${type}` : '';
             line.className = `mp-log-line${cls}`;
-            const now = new Date();
-            const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
             line.innerHTML = `<span class="mp-log-time">[${ts}]</span><span class="mp-log-content">${escapeHTML(msg)}</span>`;
             const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
             logEl.appendChild(line);
@@ -1037,7 +1038,7 @@
                     // 寻宝模式关闭雇佣 -> 直接迎战
                     hiring = true;
                     try {
-                        thLog('遭遇妖兽，直接迎战...', 'info');
+                        logMonsterInfo(thLog);
                         const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
                             clickButtonByText(o, '迎战');
                             for (let i = 0; i < 150; i++) {
@@ -1057,7 +1058,7 @@
                     // 监控模式关闭雇佣 -> 直接迎战
                     hiring = true;
                     try {
-                        monitorLog('遭遇妖兽，直接迎战...', 'info');
+                        logMonsterInfo(monitorLog);
                         const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
                             clickButtonByText(o, '迎战');
                             for (let i = 0; i < 150; i++) {
@@ -1103,11 +1104,13 @@
                             updateDayNightIndicator(newIsDay);
                             if (oldIsDay !== null && oldIsDay !== newIsDay) {
                                 monitorLog(`昼夜切换: ${oldIsDay ? '白天' : '夜晚'} → ${newIsDay ? '白天' : '夜晚'}`, 'action');
-                                await handleDayNightTransition(newIsDay);
-                            }
-                            if (newIsDay) {
-                                const isMeditating = playerInfo.data.isMeditating
-                                    || document.getElementById('meditateBtn')?.classList.contains('meditating');
+                                if (newIsDay && window.__thRunning) {
+                                    monitorLog('寻宝进行中，跳过冥想', 'info');
+                                } else {
+                                    await handleDayNightTransition(newIsDay);
+                                }
+                                dayNightState.meditateRetryCount = 0;
+                            } else if (newIsDay && !window.__thRunning) {
                                 if (isMeditating) {
                                     dayNightState.meditateRetryCount = 0;
                                 } else if (dayNightState.meditateRetryCount < config.dayNight.maxMeditateRetries) {
@@ -1145,9 +1148,8 @@
                         instantMeditateOk = true;
                         monitorLog('高级冥想成功，点击冥想修炼...', 'success');
                         await sleep(500);
-                        const medBtnOk = document.getElementById('meditateBtn');
-                        if (medBtnOk && !medBtnOk.classList.contains('meditating')) {
-                            medBtnOk.click();
+                        if ((await isMeditatingViaApi()) === false) {
+                            document.getElementById('meditateBtn')?.click();
                         }
                         await sleep(500);
                         if (clickButtonByText(document, '收功')) {
@@ -1171,9 +1173,8 @@
             if (window._autoExploreRunning) {
                 window.stopAutoExplore('神识不足', false);
             }
-            const medBtn = document.getElementById('meditateBtn');
-            if (medBtn && !medBtn.classList.contains('meditating')) {
-                medBtn.click();
+            if ((await isMeditatingViaApi()) === false) {
+                document.getElementById('meditateBtn')?.click();
             }
             toggleAutoCheckbox(false);
             window.__monitorRunning = false;
@@ -1530,10 +1531,11 @@
         for (let i = 0; i < 20; i++) {
             await sleep(1500);
             if (!isRunning()) return false;
-            const medBtn = document.getElementById('meditateBtn');
-            if (!(medBtn && medBtn.classList.contains('meditating'))) return true;
+            const meditating = await isMeditatingViaApi();
+            if (meditating === false) return true;
+            // meditating === true 或 null（查询失败），继续等待
             const sb = document.querySelector('.btn-stop-meditate');
-            if (sb) {
+            if (sb && meditating === true) {
                 if (logFn) logFn('检测到重新冥想，再次收功...', 'action');
                 sb.click();
             }
@@ -1559,8 +1561,7 @@
     async function switchToExplore() {
         dayNightState.transitioning = true;
         try {
-            const medBtn = document.getElementById('meditateBtn');
-            if (medBtn && medBtn.classList.contains('meditating')) {
+            if (await isMeditatingViaApi()) {
                 const stopBtn = document.querySelector('.btn-stop-meditate');
                 if (stopBtn) {
                     stopBtn.click();
@@ -1577,16 +1578,41 @@
         }
     }
 
+    async function isMeditatingViaApi() {
+        try {
+            const info = await getPlayerInfo();
+            if (info && info.data) return !!info.data.isMeditating;
+            return null;
+        } catch { return null; }
+    }
+
     async function switchToMeditate() {
         dayNightState.transitioning = true;
         try {
             toggleAutoCheckbox(false);
             if (!window.__monitorRunning) return;
-            const medBtn = document.getElementById('meditateBtn');
-            if (medBtn && !medBtn.classList.contains('meditating')) {
-                medBtn.click();
-                monitorLog('白天到来，进入冥想', 'success');
+            // 先确认当前是否已在冥想
+            if (await isMeditatingViaApi()) {
+                monitorLog('已在冥想中', 'info');
+                updateDayNightIndicator(true);
+                return;
             }
+            const medBtn = document.getElementById('meditateBtn');
+            if (medBtn) {
+                medBtn.click();
+                monitorLog('白天到来，尝试进入冥想...', 'action');
+            }
+            // 通过接口轮询确认冥想是否真正启动
+            for (let i = 0; i < 10; i++) {
+                await sleep(500);
+                if (!window.__monitorRunning) return;
+                if (await isMeditatingViaApi()) {
+                    monitorLog('已进入冥想', 'success');
+                    updateDayNightIndicator(true);
+                    return;
+                }
+            }
+            monitorLog('冥想未成功启动，将在下次检查时重试', 'warn');
             updateDayNightIndicator(true);
         } finally {
             dayNightState.transitioning = false;
@@ -1632,22 +1658,29 @@
             }
         }
 
-        if (playerInfo && playerInfo.data && playerInfo.data.isMeditating) {
-            const status = document.getElementById(mode === 'monitor' ? 'monitor-status' : 'treasure-status');
-            if (status) status.innerHTML = '<span class="mp-status-dot"></span>收功中...';
-            logFn('正在收功...', 'action');
-
-            const stopBtn = document.querySelector('.btn-stop-meditate');
-            if (stopBtn) stopBtn.click();
-
-            const stopOk = await waitMeditateStop(logFn);
-            if (!stopOk) return { ok: false };
-            logFn('收功完成', 'success');
-        }
-
+        // 先初始化昼夜状态，再决定是否收功
         if (config.dayNight.enabled && playerInfo && playerInfo.data) {
             dayNightState.currentIsDay = typeof playerInfo.data.isNight === 'boolean' ? !playerInfo.data.isNight : null;
             dayNightState.lastCheckTime = 0;
+        }
+
+        if (playerInfo && playerInfo.data && playerInfo.data.isMeditating) {
+            // 白天且启用昼夜模式时，保持冥想不收功
+            const shouldKeepMeditating = config.dayNight.enabled && dayNightState.currentIsDay === true;
+            if (shouldKeepMeditating) {
+                logFn('白天模式，保持冥想状态', 'info');
+            } else {
+                const status = document.getElementById(mode === 'monitor' ? 'monitor-status' : 'treasure-status');
+                if (status) status.innerHTML = '<span class="mp-status-dot"></span>收功中...';
+                logFn('正在收功...', 'action');
+
+                const stopBtn = document.querySelector('.btn-stop-meditate');
+                if (stopBtn) stopBtn.click();
+
+                const stopOk = await waitMeditateStop(logFn);
+                if (!stopOk) return { ok: false };
+                logFn('收功完成', 'success');
+            }
         }
 
         return { ok: true, playerInfo };
@@ -1684,6 +1717,15 @@
         }
     }
 
+    // --- 打印妖兽属性 ---
+    function logMonsterInfo(logFn) {
+        const name = document.getElementById('encounterMonsterName')?.textContent || '';
+        const realm = document.getElementById('encounterMonsterRealm')?.textContent || '';
+        const atk = document.getElementById('encounterMonsterAtk')?.textContent || '';
+        const hp = document.getElementById('encounterMonsterHp')?.textContent || '';
+        if (name) logFn(`遭遇 ${name} (${realm}) 攻:${atk} 血:${hp}`, 'warn');
+    }
+
     // --- 雇佣护道者主流程 ---
     async function hireProtector(mode = 'monitor') {
         const logFn = mode === 'monitor' ? monitorLog : thLog;
@@ -1697,6 +1739,7 @@
 
         try {
             logFn('遭遇妖兽！开始雇佣流程...', 'info');
+            logMonsterInfo(logFn);
             if (!isRunning()) return;
             const overlay = document.getElementById('encounterOverlay');
             if (!overlay) {
@@ -2044,8 +2087,7 @@
                 thLog(`使用藏宝图 (剩余 ${mapInfo.quantity} 张)...`, 'action');
 
                 const playerInfo = await getPlayerInfo().catch(() => null);
-                const isMeditating = (playerInfo && playerInfo.data && playerInfo.data.isMeditating)
-                    || (document.getElementById('meditateBtn')?.classList.contains('meditating'));
+                const isMeditating = playerInfo && playerInfo.data && playerInfo.data.isMeditating;
                 if (isMeditating) {
                     thLog('正在收功...', 'action');
                     const stopBtn = document.querySelector('.btn-stop-meditate');
@@ -2139,9 +2181,11 @@
         let endMapCount = 0;
         try { const m = await getTreasureMapItemId(); if (m) endMapCount = m.quantity; } catch {}
         thLog(`=== 寻宝结束，藏宝图 ${startMapCount} → ${endMapCount}，共使用 ${used} 次，遭遇 ${encounterCount} 次，获得 ${totalXiuwei} 修为 ${totalLingshi} 灵石，耗时 ${em}分${es}秒 ===`, 'success');
-        const medBtn = document.getElementById('meditateBtn');
-        if (medBtn && !medBtn.classList.contains('meditating')) {
-            medBtn.click();
+        if (config.dayNight.enabled && window.__monitorRunning) {
+            // 寻宝结束后强制触发昼夜校验
+            dayNightState.lastCheckTime = 0;
+        } else if ((await isMeditatingViaApi()) === false) {
+            document.getElementById('meditateBtn')?.click();
             thLog('已进入冥想', 'success');
         }
         syncStopTHUI();
@@ -2674,6 +2718,14 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.14</div>
+                            <div>• 修复Via浏览器兼容性（unsafeWindow降级到window）</div>
+                            <div>• 遭遇妖兽时打印妖兽属性信息</div>
+                            <div>• 昼夜冥想逻辑重构，通过API确认冥想状态</div>
+                            <div>• 寻宝与昼夜模式双向集成</div>
+                            <div>• 控制台日志增加时间戳</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.13</div>
                             <div>• 新增盐值验证，启动前检查 unsafeWindow.__S</div>
                             <div>• 缩小面板蓝色呼吸光环动画</div>
@@ -2684,10 +2736,6 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.12</div>
                             <div>• 渡劫五劫及以上跳过虚空淬体检测，不再弹出确认框</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.11</div>
-                            <div>• 新增寻宝结束日志中的藏宝图数量变化统计（开始 → 剩余）</div>
                         </div>
                     </div>
                 </div>
@@ -2912,8 +2960,14 @@
                 status.innerHTML = '<span class="mp-status-dot"></span>运行中<span id="daynight-indicator" class="mp-daynight-indicator" style="display:none;"></span>';
                 startMainLoop();
                 if (config.dayNight.enabled && dayNightState.currentIsDay === true) {
-                    monitorLog('探索已启动（当前白天，自动冥想）', 'success');
-                    await switchToMeditate();
+                    const alreadyMeditating = check.playerInfo?.data?.isMeditating;
+                    if (alreadyMeditating) {
+                        monitorLog('探索已启动（白天冥想中）', 'success');
+                    } else {
+                        monitorLog('探索已启动（当前白天，自动冥想）', 'success');
+                        await switchToMeditate();
+                    }
+                    updateDayNightIndicator(true);
                 } else {
                     toggleAutoCheckbox(true);
                     monitorLog('探索已启动', 'success');
@@ -2946,6 +3000,9 @@
                 treasureStartToken++;
                 window.__thRunning = false;
                 syncStopTHUI();
+                if (config.dayNight.enabled && window.__monitorRunning) {
+                    dayNightState.lastCheckTime = 0;
+                }
                 if (!window.__monitorRunning) stopMainLoop();
                 thLog('已停止寻宝', 'warn');
             } else {
