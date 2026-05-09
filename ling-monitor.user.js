@@ -2674,16 +2674,20 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.13</div>
+                            <div>• 新增盐值验证，启动前检查 unsafeWindow.__S</div>
+                            <div>• 缩小面板蓝色呼吸光环动画</div>
+                            <div>• 展开面板时日志自动滚动到底部</div>
+                            <div>• 寻宝结束日志增加使用次数统计</div>
+                            <div>• 虚空淬体跳过条件调整为渡劫六劫及以上</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.12</div>
                             <div>• 渡劫五劫及以上跳过虚空淬体检测，不再弹出确认框</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.11</div>
                             <div>• 新增寻宝结束日志中的藏宝图数量变化统计（开始 → 剩余）</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.10</div>
-                            <div>• 移除寻宝配置面板中的商人设置区块，商人设置仅在探索 Tab 显示</div>
                         </div>
                     </div>
                 </div>
