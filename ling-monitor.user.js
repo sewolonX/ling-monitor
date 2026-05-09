@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.14
+// @version 1.9.15
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -721,7 +721,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.14';
+    const SCRIPT_VERSION = '1.9.15';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1033,6 +1033,9 @@
         {
             const o = document.getElementById('encounterOverlay');
             if (isOverlayVisible('encounterOverlay') && !hiring) {
+                const now = Date.now();
+                if (now - lastEncounterTime < 3000) return;
+                lastEncounterTime = now;
                 const encounterMode = window.__thRunning ? 'treasure' : 'monitor';
                 if (encounterMode === 'treasure' && !config.treasureHunt.hireProtector) {
                     // 寻宝模式关闭雇佣 -> 直接迎战
@@ -1049,8 +1052,8 @@
                         });
                         if (battleResult?.data) parseBattleResult(battleResult.data, thLog);
                         signalBattleEnd(battleResult);
-                    } finally {
-                        hiring = false;
+                    } catch (e) {
+                        thLog('迎战异常: ' + e.message, 'error');
                     }
                     return;
                 }
@@ -1069,8 +1072,8 @@
                         });
                         if (battleResult?.data) parseBattleResult(battleResult.data, monitorLog);
                         signalBattleEnd(battleResult);
-                    } finally {
-                        hiring = false;
+                    } catch (e) {
+                        monitorLog('迎战异常: ' + e.message, 'error');
                     }
                     return;
                 }
@@ -1733,9 +1736,6 @@
         if (hiring) return;
         if (!isRunning()) return;
         hiring = true;
-        const now = Date.now();
-        if (now - lastEncounterTime < 3000) { hiring = false; return; }
-        lastEncounterTime = now;
 
         try {
             logFn('遭遇妖兽！开始雇佣流程...', 'info');
@@ -1821,8 +1821,6 @@
             signalBattleEnd(hired);
         } catch (e) {
             logFn('错误: ' + e.message, 'error');
-        } finally {
-            hiring = false;
         }
     }
 
@@ -2148,11 +2146,6 @@
 
                 if (isOverlayVisible('encounterOverlay')) {
                     encounterCount++;
-                    const name = document.getElementById('encounterMonsterName')?.textContent || '';
-                    const realm = document.getElementById('encounterMonsterRealm')?.textContent || '';
-                    const atk = document.getElementById('encounterMonsterAtk')?.textContent || '';
-                    const hp = document.getElementById('encounterMonsterHp')?.textContent || '';
-                    thLog(`遭遇 ${name} (${realm}) 攻:${atk} 血:${hp}`, 'warn');
                     const battleData = await waitForBattleEnd();
                     if (battleData?.data?.logs) {
                         for (const log of battleData.data.logs) {
@@ -2718,6 +2711,11 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.15</div>
+                            <div>• 修复遭遇妖兽信息重复打印问题</div>
+                            <div>• 修复hiring标志过早重置导致重复触发雇佣流程</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.14</div>
                             <div>• 修复Via浏览器兼容性（unsafeWindow降级到window）</div>
                             <div>• 遭遇妖兽时打印妖兽属性信息</div>
@@ -2732,10 +2730,6 @@
                             <div>• 展开面板时日志自动滚动到底部</div>
                             <div>• 寻宝结束日志增加使用次数统计</div>
                             <div>• 虚空淬体跳过条件调整为渡劫六劫及以上</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.12</div>
-                            <div>• 渡劫五劫及以上跳过虚空淬体检测，不再弹出确认框</div>
                         </div>
                     </div>
                 </div>
