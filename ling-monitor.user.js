@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.15
+// @version 1.9.16
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -721,7 +721,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.15';
+    const SCRIPT_VERSION = '1.9.16';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1114,7 +1114,7 @@
                                 }
                                 dayNightState.meditateRetryCount = 0;
                             } else if (newIsDay && !window.__thRunning) {
-                                if (isMeditating) {
+                                if (playerInfo && playerInfo.data && playerInfo.data.isMeditating) {
                                     dayNightState.meditateRetryCount = 0;
                                 } else if (dayNightState.meditateRetryCount < config.dayNight.maxMeditateRetries) {
                                     dayNightState.meditateRetryCount++;
@@ -2711,6 +2711,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.16</div>
+                            <div>• 修复昼夜模式白天冥想重试变量未定义导致重试逻辑无法执行</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.15</div>
                             <div>• 修复遭遇妖兽信息重复打印问题</div>
                             <div>• 修复hiring标志过早重置导致重复触发雇佣流程</div>
@@ -2722,14 +2726,6 @@
                             <div>• 昼夜冥想逻辑重构，通过API确认冥想状态</div>
                             <div>• 寻宝与昼夜模式双向集成</div>
                             <div>• 控制台日志增加时间戳</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.13</div>
-                            <div>• 新增盐值验证，启动前检查 unsafeWindow.__S</div>
-                            <div>• 缩小面板蓝色呼吸光环动画</div>
-                            <div>• 展开面板时日志自动滚动到底部</div>
-                            <div>• 寻宝结束日志增加使用次数统计</div>
-                            <div>• 虚空淬体跳过条件调整为渡劫六劫及以上</div>
                         </div>
                     </div>
                 </div>
