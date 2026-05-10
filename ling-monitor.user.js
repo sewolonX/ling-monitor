@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.17
+// @version 1.9.18
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -721,11 +721,11 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.17';
+    const SCRIPT_VERSION = '1.9.18';
 
     const DEFAULT_CONFIG = {
         protectors: {
-            hireProtector: true,               // 新增：监控模式下是否雇佣护道者
+            hireProtector: true,
             priorities: [
                 { nameMatch: '蜉蝣一梦', sortBy: 'attack', sortOrder: 'desc' },
                 { realmMatch: '渡劫|大乘|合道', sortBy: 'attack', sortOrder: 'desc' }
@@ -985,22 +985,6 @@
             return;
         }
 
-        // // 2. 逮捕
-        // const arrest = document.getElementById('arrestOverlay');
-        // if (arrest && !arrest.classList.contains('hidden')) {
-        //     if (window.__monitorRunning) {
-        //         monitorLog('被逮捕！停止探索', 'error');
-        //         window.__monitorRunning = false;
-        //         syncStopUI();
-        //     }
-        //     if (window.__thRunning) {
-        //         thLog('被逮捕！停止寻宝', 'error');
-        //         syncStopTHUI();
-        //     }
-        //     stopMainLoop();
-        //     return;
-        // }
-
         // 3. PVP
         if (isOverlayVisible('pvpEncounterModal')) {
             await dismissLeaveModal('pvpEncounterModal', '遭遇PVP，悄然离去');
@@ -1014,10 +998,10 @@
         }
 
         // 5. 公告
-        const announce = document.getElementById('announceOverlay');
-        if (announce && !announce.classList.contains('hidden')) {
+        if (isOverlayVisible('announceOverlay')) {
             activeLog()('关闭公告弹窗', 'action');
-            const closeBtn = announce.querySelector('.announce-close, .announce-confirm');
+            const announce = document.getElementById('announceOverlay');
+            const closeBtn = announce?.querySelector('.announce-close, .announce-confirm');
             if (closeBtn) closeBtn.click();
             return;
         }
@@ -1029,7 +1013,7 @@
             return;
         }
 
-        // 7. 遭遇妖兽（两种模式都处理）
+        // 7. 遭遇妖兽
         {
             const o = document.getElementById('encounterOverlay');
             if (isOverlayVisible('encounterOverlay') && !hiring) {
@@ -1037,48 +1021,11 @@
                 if (now - lastEncounterTime < 3000) return;
                 lastEncounterTime = now;
                 const encounterMode = window.__thRunning ? 'treasure' : 'monitor';
-                if (encounterMode === 'treasure' && !config.treasureHunt.hireProtector) {
-                    // 寻宝模式关闭雇佣 -> 直接迎战
-                    hiring = true;
-                    try {
-                        logMonsterInfo(thLog);
-                        const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
-                            clickButtonByText(o, '迎战');
-                            for (let i = 0; i < 150; i++) {
-                                await sleep(200);
-                                if (!isRunning() || getCaptured()) break;
-                            }
-                            return getCaptured();
-                        });
-                        if (battleResult?.data) parseBattleResult(battleResult.data, thLog);
-                        signalBattleEnd(battleResult);
-                    } catch (e) {
-                        thLog('迎战异常: ' + e.message, 'error');
-                    } finally {
-                        hiring = false;
-                    }
-                    return;
-                }
-                if (encounterMode === 'monitor' && !config.protectors.hireProtector) {
-                    // 监控模式关闭雇佣 -> 直接迎战
-                    hiring = true;
-                    try {
-                        logMonsterInfo(monitorLog);
-                        const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
-                            clickButtonByText(o, '迎战');
-                            for (let i = 0; i < 150; i++) {
-                                await sleep(200);
-                                if (!isRunning() || getCaptured()) break;
-                            }
-                            return getCaptured();
-                        });
-                        if (battleResult?.data) parseBattleResult(battleResult.data, monitorLog);
-                        signalBattleEnd(battleResult);
-                    } catch (e) {
-                        monitorLog('迎战异常: ' + e.message, 'error');
-                    } finally {
-                        hiring = false;
-                    }
+                const logFn = encounterMode === 'treasure' ? thLog : monitorLog;
+                const hireEnabled = encounterMode === 'treasure' ? config.treasureHunt.hireProtector : config.protectors.hireProtector;
+                if (!hireEnabled) {
+                    logMonsterInfo(logFn);
+                    await directFight(o, logFn);
                     return;
                 }
                 await hireProtector(encounterMode);
@@ -1190,7 +1137,7 @@
         }
     }
 
-    // --- 整理储物袋 ---
+    // --- 整理储物 ---
     let _lastMerge = 0;
     async function mergeInventory() {
         const now = Date.now();
@@ -1198,27 +1145,30 @@
         _lastMerge = now;
         try {
             const r = await callApi('POST', '/api/game/inventory/merge', {});
-            if (r?.code === 200) activeLog('整理储物袋完成', 'success');
-            else activeLog(`整理储物袋失败: ${r?.message || '未知错误'}`, 'error');
+            if (r?.code === 200) activeLog()('整理储物完成', 'success');
+            else activeLog()(`整理储物失败: ${r?.message || '未知错误'}`, 'error');
         } catch {}
     }
 
-    // --- 主循环管理 ---
+    // --- 主循环管理（Web Worker 定时器，后台标签页不被节流） ---
     function startMainLoop() {
-        if (window.__mainLoopInterval) return;
-        window.__mainLoopInterval = setInterval(async () => {
+        if (window.__mainLoopWorker) return;
+        const workerCode = 'setInterval(() => postMessage(1), 500)';
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        window.__mainLoopWorker = new Worker(URL.createObjectURL(blob));
+        window.__mainLoopWorker.onmessage = async () => {
             try {
                 if (!isRunning()) return;
                 await checkAllPopups();
                 await mergeInventory();
             } catch (e) { console.error('[灵界助手] 主循环异常:', e); }
-        }, 500);
+        };
     }
 
     function stopMainLoop() {
-        if (window.__mainLoopInterval) {
-            clearInterval(window.__mainLoopInterval);
-            window.__mainLoopInterval = null;
+        if (window.__mainLoopWorker) {
+            window.__mainLoopWorker.terminate();
+            window.__mainLoopWorker = null;
         }
     }
 
@@ -1274,6 +1224,10 @@
 
     // --- 关闭打赏弹窗 ---
     async function dismissTipDialog(timeout = 3000) {
+        const modal = document.getElementById('gameDialogModal');
+        if (!modal || getComputedStyle(modal).display === 'none' || !modal.textContent.includes('打赏')) {
+            return false;
+        }
         const start = Date.now();
         while (Date.now() - start < timeout) {
             if (!isRunning()) return false;
@@ -1673,7 +1627,7 @@
 
         if (playerInfo && playerInfo.data && playerInfo.data.isMeditating) {
             // 白天且启用昼夜模式时，保持冥想不收功
-            const shouldKeepMeditating = config.dayNight.enabled && dayNightState.currentIsDay === true;
+            const shouldKeepMeditating = mode === 'monitor' && config.dayNight.enabled && dayNightState.currentIsDay === true;
             if (shouldKeepMeditating) {
                 logFn('白天模式，保持冥想状态', 'info');
             } else {
@@ -1731,6 +1685,27 @@
         const atk = document.getElementById('encounterMonsterAtk')?.textContent || '';
         const hp = document.getElementById('encounterMonsterHp')?.textContent || '';
         if (name) logFn(`遭遇 ${name} (${realm}) 攻:${atk} 血:${hp}`, 'warn');
+    }
+
+    // --- 直接迎战 ---
+    async function directFight(overlay, logFn) {
+        hiring = true;
+        try {
+            const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
+                clickButtonByText(overlay, '迎战');
+                for (let i = 0; i < 150; i++) {
+                    await sleep(200);
+                    if (!isRunning() || getCaptured()) break;
+                }
+                return getCaptured();
+            });
+            if (battleResult?.data) parseBattleResult(battleResult.data, logFn);
+            signalBattleEnd(battleResult);
+        } catch (e) {
+            logFn('迎战异常: ' + e.message, 'error');
+        } finally {
+            hiring = false;
+        }
     }
 
     // --- 雇佣护道者主流程 ---
@@ -1793,19 +1768,7 @@
 
                 logFn('暂无空闲护道者，选择迎战...', 'info');
                 if (!isRunning()) return;
-                const fightOverlay = document.getElementById('encounterOverlay');
-                if (fightOverlay) {
-                    const battleResult = await withFetchIntercept(_uw, 'combat-choice', null, async (getCaptured) => {
-                        clickButtonByText(fightOverlay, '迎战');
-                        for (let i = 0; i < 150; i++) {
-                            await sleep(200);
-                            if (!isRunning() || getCaptured()) break;
-                        }
-                        return getCaptured();
-                    });
-                    if (battleResult?.data) parseBattleResult(battleResult.data, logFn);
-                    signalBattleEnd(battleResult);
-                }
+                await directFight(document.getElementById('encounterOverlay'), logFn);
                 return;
             }
 
@@ -2722,6 +2685,16 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.18</div>
+                            <div>• 修复寻宝模式启动时昼夜保持冥想逻辑错误拦截收功流程</div>
+                            <div>• 重构遭遇妖兽迎战逻辑，提取公共函数消除重复代码</div>
+                            <div>• 移除已废弃的逮捕检测注释代码</div>
+                            <div>• 优化公告弹窗检测，统一使用 isOverlayVisible 并增加空值保护</div>
+                            <div>• 优化主循环定时器，改用 Web Worker 避免后台标签页被浏览器节流</div>
+                            <div>• 修复整理储物日志函数调用方式错误</div>
+                            <div>• 优化打赏弹窗关闭逻辑，入口前置文本检测减少无效轮询</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.17</div>
                             <div>• 修复遇敌处理偶尔不生效（hiring标志死锁导致主循环无法处理遇敌）</div>
                             <div>• 寻宝等待遇敌处理增加超时强制重试机制</div>
@@ -2729,11 +2702,6 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.16</div>
                             <div>• 修复昼夜模式白天冥想重试变量未定义导致重试逻辑无法执行</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.15</div>
-                            <div>• 修复遭遇妖兽信息重复打印问题</div>
-                            <div>• 修复hiring标志过早重置导致重复触发雇佣流程</div>
                         </div>
                     </div>
                 </div>
