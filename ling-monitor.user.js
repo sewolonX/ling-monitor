@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.16
+// @version 1.9.17
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -721,7 +721,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.16';
+    const SCRIPT_VERSION = '1.9.17';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1054,6 +1054,8 @@
                         signalBattleEnd(battleResult);
                     } catch (e) {
                         thLog('迎战异常: ' + e.message, 'error');
+                    } finally {
+                        hiring = false;
                     }
                     return;
                 }
@@ -1074,6 +1076,8 @@
                         signalBattleEnd(battleResult);
                     } catch (e) {
                         monitorLog('迎战异常: ' + e.message, 'error');
+                    } finally {
+                        hiring = false;
                     }
                     return;
                 }
@@ -1821,6 +1825,8 @@
             signalBattleEnd(hired);
         } catch (e) {
             logFn('错误: ' + e.message, 'error');
+        } finally {
+            hiring = false;
         }
     }
 
@@ -2125,6 +2131,11 @@
                             await sleep(500);
                             if (!window.__thRunning) break;
                             if (!isOverlayVisible('encounterOverlay')) break;
+                            // 超时10秒仍未消失，强制重置hiring让主循环重新处理
+                            if (i === 20 && hiring) {
+                                thLog('遇敌处理超时，重试...', 'warn');
+                                hiring = false;
+                            }
                         }
                         continue;
                     }
@@ -2711,6 +2722,11 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.17</div>
+                            <div>• 修复遇敌处理偶尔不生效（hiring标志死锁导致主循环无法处理遇敌）</div>
+                            <div>• 寻宝等待遇敌处理增加超时强制重试机制</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.16</div>
                             <div>• 修复昼夜模式白天冥想重试变量未定义导致重试逻辑无法执行</div>
                         </div>
@@ -2718,14 +2734,6 @@
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.15</div>
                             <div>• 修复遭遇妖兽信息重复打印问题</div>
                             <div>• 修复hiring标志过早重置导致重复触发雇佣流程</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.14</div>
-                            <div>• 修复Via浏览器兼容性（unsafeWindow降级到window）</div>
-                            <div>• 遭遇妖兽时打印妖兽属性信息</div>
-                            <div>• 昼夜冥想逻辑重构，通过API确认冥想状态</div>
-                            <div>• 寻宝与昼夜模式双向集成</div>
-                            <div>• 控制台日志增加时间戳</div>
                         </div>
                     </div>
                 </div>
@@ -3133,6 +3141,7 @@
 
     function autoSaveConfig(silent) {
         try {
+            const before = JSON.stringify(config);
             const el = id => document.getElementById(id);
             if (el('cfg-hireMode')) config.protectors.hireMode = el('cfg-hireMode').value;
             if (el('cfg-monitor-hireProtector')) config.protectors.hireProtector = el('cfg-monitor-hireProtector').checked;
@@ -3187,7 +3196,7 @@
                 config.protectors.priorities = priorities;
             }
             saveConfig(config);
-            if (!silent) {
+            if (!silent && JSON.stringify(config) !== before) {
                 const activeTab = document.querySelector('.mp-tab.active');
                 const tabName = activeTab ? activeTab.dataset.tab : 'monitor';
                 const logFn = tabName === 'treasure' ? thLog : (tabName === 'inscription' ? inscriptionLog : monitorLog);
