@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.19
+// @version 1.9.20
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -721,7 +721,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.19';
+    const SCRIPT_VERSION = '1.9.20';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -985,19 +985,19 @@
             return;
         }
 
-        // 3. PVP
+        // 2. PVP
         if (isOverlayVisible('pvpEncounterModal')) {
             await dismissLeaveModal('pvpEncounterModal', '遭遇PVP，悄然离去');
             return;
         }
 
-        // 4. 邀约
+        // 3. 邀约
         if (isOverlayVisible('encounterInviteModal')) {
             await dismissLeaveModal('encounterInviteModal', '收到邀约，婉言告辞');
             return;
         }
 
-        // 5. 公告
+        // 4. 公告
         if (isOverlayVisible('announceOverlay')) {
             activeLog()('关闭公告弹窗', 'action');
             const announce = document.getElementById('announceOverlay');
@@ -1006,11 +1006,22 @@
             return;
         }
 
-        // 6. 打赏
+        // 5. 打赏
         const tipDismissed = await dismissTipDialog(600);
         if (tipDismissed) {
             activeLog()('已关闭打赏弹窗', 'info');
             return;
+        }
+
+        // 6. 冥想冲突弹窗（冥想中无法探索）
+        {
+            const modal = document.getElementById('gameDialogModal');
+            if (modal && !modal.classList.contains('hidden') && modal.dataset.meditationConflict === '1') {
+                const closeBtn = modal.querySelector('.modal-header-close');
+                if (closeBtn) closeBtn.click();
+                activeLog()('冥想冲突弹窗，已关闭', 'action');
+                return;
+            }
         }
 
         // 7. 遭遇妖兽
@@ -1042,7 +1053,7 @@
             return;
         }
 
-        // 8.5. 昼夜自动切换
+        // 9. 昼夜自动切换
         if (window.__monitorRunning && config.dayNight.enabled && !dayNightState.transitioning) {
             const now = Date.now();
             const intervalMs = config.dayNight.checkIntervalSec * 1000;
@@ -1086,7 +1097,7 @@
             }
         }
 
-        // 9. 神识不足（仅监控模式）
+        // 10. 神识不足（仅监控模式）
         if (window.__monitorRunning && window.__shenshiInsufficient) {
             window.__shenshiInsufficient = false;
             monitorLog('检测到神识不足...', 'info');
@@ -2675,6 +2686,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.20</div>
+                            <div>• 新增冥想冲突弹窗自动关闭（冥想中无法探索时自动点击关闭）</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.19</div>
                             <div>• 修复铭文洗练暂停后被自动关闭弹窗逻辑误点击导致立即恢复</div>
                         </div>
@@ -2687,11 +2702,6 @@
                             <div>• 优化主循环定时器，改用 Web Worker 避免后台标签页被浏览器节流</div>
                             <div>• 修复整理储物日志函数调用方式错误</div>
                             <div>• 优化打赏弹窗关闭逻辑，入口前置文本检测减少无效轮询</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.17</div>
-                            <div>• 修复遇敌处理偶尔不生效（hiring标志死锁导致主循环无法处理遇敌）</div>
-                            <div>• 寻宝等待遇敌处理增加超时强制重试机制</div>
                         </div>
                     </div>
                 </div>

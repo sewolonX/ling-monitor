@@ -110,7 +110,7 @@
 
 - 单文件 IIFE 脚本，无外部依赖
 - 依赖 Tampermonkey 的 `GM_getValue`/`GM_setValue`/`GM_addStyle`/`unsafeWindow` API
-- 主循环使用 Web Worker 定时器（500ms 间隔），后台标签页不被浏览器节流，优先级：死亡 > PVP > 公告 > 遭遇 > 商人 > 昼夜切换 > 神识不足
+- 主循环使用 Web Worker 定时器（500ms 间隔），后台标签页不被浏览器节流，优先级：死亡 > PVP > 邀约 > 公告 > 打赏 > 冥想冲突 > 遭遇 > 商人 > 昼夜切换 > 神识不足
 - 所有异步流程支持干净停止（检查 `__monitorRunning` 标志）
 - 配置通过 GM 存储持久化，新版本新增的配置项自动合并已有配置，深拷贝编辑避免污染默认值
 - 拦截 `fetch` 捕获雇佣和移动 API 响应，拦截 `showToast` 检测神识不足
