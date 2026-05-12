@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.22
+// @version 1.9.23
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.22';
+    const SCRIPT_VERSION = '1.9.23';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -990,7 +990,9 @@
 
         // 2. PVP
         if (isOverlayVisible('pvpEncounterModal')) {
-            await dismissLeaveModal('pvpEncounterModal', '遭遇PVP，悄然离去');
+            activeLog()('遭遇PVP，悄然离去', 'action');
+            const btn = document.querySelector('#pvpEncounterModal .modal-btn:last-child');
+            if (btn) btn.click();
             return;
         }
 
@@ -2717,6 +2719,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.23</div>
+                            <div>• 修复PVP遭遇点击按钮选择错误（改用直接选择器点击悄然离去）</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.22</div>
                             <div>• 修复昼夜切换与神识不足并发导致高级冥想失败</div>
                             <div>• 修复主循环回调重入导致状态竞争</div>
@@ -2725,10 +2731,6 @@
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.21</div>
                             <div>• 新增探索和寻宝配置项"启用道韵检查"，可关闭启动时的道韵加成校验</div>
                             <div>• 新增探索倍率配置（1/5/10/20/50），启动探索时自动设置</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.20</div>
-                            <div>• 新增冥想冲突弹窗自动关闭（冥想中无法探索时自动点击关闭）</div>
                         </div>
                     </div>
                 </div>
