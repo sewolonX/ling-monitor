@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.20
+// @version 1.9.21
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -476,7 +476,6 @@
         .cfg-hint {
             font-size: 11px; font-weight: 400;
             color: var(--mp-text-muted);
-            margin-left: 8px;
         }
         #config-panel input[type=number],
         #config-panel input[type=text],
@@ -721,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.20';
+    const SCRIPT_VERSION = '1.9.21';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -746,12 +745,15 @@
         },
         general: {
             highLevelMeditate: true,
+            checkDaoyun: true,
+            exploreMultiplier: 1,
         },
         treasureHunt: {
             batchSize: 0,
             intervalMs: 2000,
             useQuantity: 10,
             hireProtector: true,
+            checkDaoyun: true,
         },
         dayNight: {
             enabled: false,
@@ -868,6 +870,7 @@
             leaveBtn.click();
             await sleep(300);
             toggleAutoCheckbox(true);
+            applyExploreMultiplier();
         }
     }
 
@@ -1122,6 +1125,7 @@
                         }
                         await waitMeditateStop(monitorLog);
                         toggleAutoCheckbox(true);
+                        applyExploreMultiplier();
                         monitorLog('已勾选自动', 'action');
                     } else {
                         monitorLog('高级冥想失败: ' + (data?.message || '未知原因') + '，转为冥想修炼', 'warn');
@@ -1195,6 +1199,20 @@
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             }
+        }
+    }
+
+    // --- 应用探索倍率 ---
+    function applyExploreMultiplier() {
+        const mult = config.general.exploreMultiplier;
+        if (!mult || mult <= 1) return;
+        const sel = document.getElementById('exploreMultiplier');
+        if (!sel) return;
+        if (sel.value !== String(mult)) {
+            sel.value = String(mult);
+            sel.dispatchEvent(new Event('change'));
+            document.getElementById('gameAlertOkBtn')?.click();
+            monitorLog(`探索倍率已设置为 ${mult}x`, 'info');
         }
     }
 
@@ -1543,6 +1561,7 @@
             }
             if (!window.__monitorRunning) return;
             toggleAutoCheckbox(true);
+            applyExploreMultiplier();
             monitorLog('夜晚降临，开始探索', 'success');
             updateDayNightIndicator(false);
         } finally {
@@ -1622,7 +1641,8 @@
             }
         }
 
-        if (masterInfo && masterInfo.data) {
+        const checkDaoyun = mode === 'monitor' ? config.general.checkDaoyun : config.treasureHunt.checkDaoyun;
+        if (checkDaoyun && masterInfo && masterInfo.data) {
             if (masterInfo.data.exploreBoostEnabled) {
                 logFn('道韵加成已开启', 'success');
             } else if (!window._origConfirm('道韵加成未开启，是否继续？')) {
@@ -2001,6 +2021,7 @@
 
         monitorLog('死亡后流程完成，继续探索...', 'success');
         toggleAutoCheckbox(true);
+        applyExploreMultiplier();
     }
 
     // ==================== 寻宝功能 ====================
@@ -2686,22 +2707,17 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.21</div>
+                            <div>• 新增探索和寻宝配置项"启用道韵检查"，可关闭启动时的道韵加成校验</div>
+                            <div>• 新增探索倍率配置（1/5/10/20/50），启动探索时自动设置</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.20</div>
                             <div>• 新增冥想冲突弹窗自动关闭（冥想中无法探索时自动点击关闭）</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.19</div>
                             <div>• 修复铭文洗练暂停后被自动关闭弹窗逻辑误点击导致立即恢复</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.18</div>
-                            <div>• 修复寻宝模式启动时昼夜保持冥想逻辑错误拦截收功流程</div>
-                            <div>• 重构遭遇妖兽迎战逻辑，提取公共函数消除重复代码</div>
-                            <div>• 移除已废弃的逮捕检测注释代码</div>
-                            <div>• 优化公告弹窗检测，统一使用 isOverlayVisible 并增加空值保护</div>
-                            <div>• 优化主循环定时器，改用 Web Worker 避免后台标签页被浏览器节流</div>
-                            <div>• 修复整理储物日志函数调用方式错误</div>
-                            <div>• 优化打赏弹窗关闭逻辑，入口前置文本检测减少无效轮询</div>
                         </div>
                     </div>
                 </div>
@@ -2936,6 +2952,7 @@
                     updateDayNightIndicator(true);
                 } else {
                     toggleAutoCheckbox(true);
+                    applyExploreMultiplier();
                     monitorLog('探索已启动', 'success');
                     if (config.dayNight.enabled) {
                         updateDayNightIndicator(dayNightState.currentIsDay);
@@ -3122,12 +3139,15 @@
             if (el('cfg-itemKeywords')) config.merchant.itemKeywords = el('cfg-itemKeywords').value.split('|').map(s => s.trim()).filter(Boolean);
             if (el('cfg-fallback')) config.merchant.fallbackToExpensive = el('cfg-fallback').checked;
             if (el('cfg-highLevelMeditate')) config.general.highLevelMeditate = el('cfg-highLevelMeditate').checked;
+            if (el('cfg-checkDaoyun')) config.general.checkDaoyun = el('cfg-checkDaoyun').checked;
+            if (el('cfg-exploreMultiplier')) config.general.exploreMultiplier = parseInt(el('cfg-exploreMultiplier').value) || 1;
+            if (el('cfg-th-checkDaoyun')) config.treasureHunt.checkDaoyun = el('cfg-th-checkDaoyun').checked;
             if (el('cfg-th-batchSize')) config.treasureHunt.batchSize = parseInt(el('cfg-th-batchSize').value) || 0;
             if (el('cfg-th-intervalMs')) config.treasureHunt.intervalMs = parseInt(el('cfg-th-intervalMs').value) || 2000;
             if (el('cfg-th-useQuantity')) config.treasureHunt.useQuantity = Math.max(1, parseInt(el('cfg-th-useQuantity').value) || 10);
             if (el('cfg-th-hireProtector')) config.treasureHunt.hireProtector = el('cfg-th-hireProtector').checked;
             if (el('cfg-dn-enabled')) config.dayNight.enabled = el('cfg-dn-enabled').checked;
-            if (el('cfg-dn-interval')) config.dayNight.checkIntervalSec = Math.max(10, parseInt(el('cfg-dn-interval').value) || 30);
+            if (el('cfg-dn-interval')) config.dayNight.checkIntervalSec = Math.max(1, parseInt(el('cfg-dn-interval').value) || 30);
             if (el('cfg-dn-maxRetries')) config.dayNight.maxMeditateRetries = Math.max(1, parseInt(el('cfg-dn-maxRetries').value) || 3);
             if (el('cfg-dn-retryInterval')) config.dayNight.meditateRetryIntervalSec = Math.max(1, parseInt(el('cfg-dn-retryInterval').value) || 5);
             if (el('ic-stopMode')) config.inscription.stopMode = el('ic-stopMode').value;
@@ -3261,6 +3281,21 @@
                     <label class="cfg-label" style="margin-bottom:0;">仙缘高级冥想</label>
                     <span class="cfg-hint">关闭则直接冥想并停止脚本</span>
                 </div>
+                <div class="cfg-row cfg-checkbox-row">
+                    <input id="cfg-checkDaoyun" type="checkbox" ${cfg.general.checkDaoyun !== false ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin-bottom:0;">启用道韵检查</label>
+                    <span class="cfg-hint">启动时检查道韵加成是否开启</span>
+                </div>
+                <div class="cfg-row">
+                    <label class="cfg-label">探索倍率</label>
+                    <select id="cfg-exploreMultiplier">
+                        <option value="1" ${(cfg.general.exploreMultiplier || 1) === 1 ? 'selected' : ''}>1x</option>
+                        <option value="5" ${cfg.general.exploreMultiplier === 5 ? 'selected' : ''}>5x</option>
+                        <option value="10" ${cfg.general.exploreMultiplier === 10 ? 'selected' : ''}>10x</option>
+                        <option value="20" ${cfg.general.exploreMultiplier === 20 ? 'selected' : ''}>20x</option>
+                        <option value="50" ${cfg.general.exploreMultiplier === 50 ? 'selected' : ''}>50x</option>
+                    </select>
+                </div>
             </div>
 
             <div class="cfg-section">
@@ -3273,7 +3308,7 @@
                 <div id="cfg-dn-settings" style="${cfg.dayNight.enabled ? '' : 'display:none;'}">
                     <div class="cfg-row">
                         <label class="cfg-label">检查间隔（秒）</label>
-                        <input id="cfg-dn-interval" type="number" value="${cfg.dayNight.checkIntervalSec}" min="10" max="300">
+                        <input id="cfg-dn-interval" type="number" value="${cfg.dayNight.checkIntervalSec}" min="1" max="300">
                         <span class="cfg-hint">建议 30-60 秒</span>
                     </div>
                     <div class="cfg-row">
@@ -3325,6 +3360,11 @@
                 <div class="cfg-row">
                     <label class="cfg-label">每次使用数量</label>
                     <input id="cfg-th-useQuantity" type="number" value="${cfg.treasureHunt.useQuantity ?? 10}" min="1">
+                </div>
+                <div class="cfg-row cfg-checkbox-row">
+                    <input id="cfg-th-checkDaoyun" type="checkbox" ${cfg.treasureHunt.checkDaoyun !== false ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin-bottom:0;">启用道韵检查</label>
+                    <span class="cfg-hint">启动时检查道韵加成是否开启</span>
                 </div>
             </div>` : ''}
 
@@ -3434,8 +3474,8 @@
 
         ['cfg-hireMode', 'cfg-onNoProtector', 'cfg-afterEscape',
          'cfg-fightThreshold', 'cfg-hirePriceThreshold', 'cfg-highPrice', 'cfg-stonePriority',
-         'cfg-itemKeywords', 'cfg-fallback', 'cfg-highLevelMeditate',
-         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-hireProtector',
+         'cfg-itemKeywords', 'cfg-fallback', 'cfg-highLevelMeditate', 'cfg-checkDaoyun', 'cfg-exploreMultiplier',
+         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun',
          'cfg-dn-enabled', 'cfg-dn-interval', 'cfg-dn-maxRetries', 'cfg-dn-retryInterval',
          'ic-stopMode', 'ic-maxAttempts', 'ic-resultAnim', 'ic-discardDelay',
          'ic-autoDialog', 'ic-notify'
