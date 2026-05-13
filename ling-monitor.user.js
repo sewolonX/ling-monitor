@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.24
+// @version 1.9.25
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.24';
+    const SCRIPT_VERSION = '1.9.25';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1109,6 +1109,8 @@
         // 10. 神识不足（仅监控模式）
         if (window.__monitorRunning && window.__shenshiInsufficient) {
             window.__shenshiInsufficient = false;
+            const now2 = Date.now();
+            if (now2 - _lastInstantMeditateTime < 5000) return;
             monitorLog('检测到神识不足...', 'info');
 
             const useHighLevelMeditate = config.general.highLevelMeditate;
@@ -1126,6 +1128,7 @@
                     const data = await callApi('POST', '/api/game/meditate/instant', { grade: 2 });
                     if (data && (data.code === 0 || data.code === 200)) {
                         instantMeditateOk = true;
+                        _lastInstantMeditateTime = Date.now();
                         monitorLog('高级冥想成功，点击冥想修炼...', 'success');
                         await sleep(500);
                         if ((await isMeditatingViaApi()) === false) {
@@ -1165,6 +1168,7 @@
     }
 
     // --- 整理储物 ---
+    let _lastInstantMeditateTime = 0;
     let _lastMerge = 0;
     async function mergeInventory() {
         const now = Date.now();
@@ -2723,17 +2727,17 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.25</div>
+                            <div>• 修复高级冥想重复触发问题</div>
+                            <div>• 修复配置面板即时保存遗漏</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.24</div>
                             <div>• 修复PVP/邀约弹窗关闭后自动按钮未重新勾选</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.23</div>
                             <div>• 修复PVP遭遇点击按钮选择错误（改用直接选择器点击悄然离去）</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.22</div>
-                            <div>• 修复昼夜切换与神识不足并发导致高级冥想失败</div>
-                            <div>• 修复主循环回调重入导致状态竞争</div>
                         </div>
                     </div>
                 </div>
@@ -3488,10 +3492,10 @@
             });
         }
 
-        ['cfg-hireMode', 'cfg-onNoProtector', 'cfg-afterEscape',
+        ['cfg-hireMode', 'cfg-monitor-hireProtector', 'cfg-onNoProtector', 'cfg-afterEscape',
          'cfg-fightThreshold', 'cfg-hirePriceThreshold', 'cfg-highPrice', 'cfg-stonePriority',
          'cfg-itemKeywords', 'cfg-fallback', 'cfg-highLevelMeditate', 'cfg-checkDaoyun', 'cfg-exploreMultiplier',
-         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun',
+         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-useQuantity', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun',
          'cfg-dn-enabled', 'cfg-dn-interval', 'cfg-dn-maxRetries', 'cfg-dn-retryInterval',
          'ic-stopMode', 'ic-maxAttempts', 'ic-resultAnim', 'ic-discardDelay',
          'ic-autoDialog', 'ic-notify'
