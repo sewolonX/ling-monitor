@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.28
+// @version 1.9.29
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.28';
+    const SCRIPT_VERSION = '1.9.29';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -2262,6 +2262,7 @@
     };
 
     let cachedInscriptionSlots = [];
+    let cachedTotalSlotCount = 0;
 
     function updateInscriptionStatusUI(status) {
         const statusEl = document.getElementById('inscription-status');
@@ -2509,6 +2510,10 @@
         if (!slots) slots = readMainPanelSlots();
         if (slots.length === 0) return { met: false, reason: '无法读取槽位' };
 
+        if (hasEmptySlots()) {
+            return { met: false, reason: '仍有空槽位未铭刻' };
+        }
+
         const targets = config.inscription.targetStats;
         if (!targets || targets.length === 0) return { met: false, reason: '无目标配置' };
 
@@ -2565,9 +2570,30 @@
         return slots;
     }
 
+    function hasEmptySlots() {
+        // 优先用缓存的槽位总数对比已填数
+        if (cachedTotalSlotCount > 0) {
+            const filled = readMainPanelSlots();
+            return filled.length < cachedTotalSlotCount;
+        }
+        // 兜底：直接查 DOM
+        const container = document.getElementById('customModal') || document;
+        for (const s of container.querySelectorAll('span')) {
+            if (s.textContent.trim().match(/^槽位\d+:\s*空$/)) return true;
+        }
+        for (const v of container.querySelectorAll('.insc-slot-btn__value')) {
+            if (v.textContent.trim() === '空') return true;
+        }
+        return false;
+    }
+
     function shouldInscribeFromMainPanel(quality, stat, value) {
         const slots = readMainPanelSlots();
         if (slots.length === 0) return { action: 'proceed', reason: '无法读取槽位' };
+
+        if (hasEmptySlots()) {
+            return { action: 'proceed', reason: '有空槽位' };
+        }
 
         for (const slot of slots) {
             if (!matchesAnyTarget(slot.stat)) {
@@ -2739,9 +2765,9 @@
             if (inscribedCount > 0) {
                 updateInscriptionStatsDisplay();
             }
-        }
 
-        await performInscriptionDiscard();
+            await performInscriptionDiscard();
+        }
     }
 
     async function startInscriptionPulling() {
@@ -2800,6 +2826,14 @@
                 }
 
                 cachedInscriptionSlots = readMainPanelSlots();
+                {
+                    const container = document.getElementById('customModal') || document;
+                    let count = 0;
+                    for (const s of container.querySelectorAll('span')) {
+                        if (s.textContent.trim().match(/^槽位\d+:/)) count++;
+                    }
+                    if (count > 0) cachedTotalSlotCount = count;
+                }
 
                 if (inscriptionStats.totalPulls > 0) {
                     const slotsCheck = checkAllSlotsMeetTargets(cachedInscriptionSlots);
@@ -2959,19 +2993,18 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.29</div>
+                            <div>• 修复铭文洗练达成目标后无条件放弃铭文的问题</div>
+                            <div>• 修复有空槽位时洗练误判为全部满足而提前停止</div>
+                            <div>• 修复有空槽位时新铭文未被铭刻的问题</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.28</div>
                             <div>• 新增寻宝间隔抖动逻辑，避免固定间隔被检测</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.27</div>
                             <div>• 新增反检测模块，替换全部自动化点击为人类行为模拟</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.26</div>
-                            <div>• 新增自动铭刻功能，支持多结果按数值降序铭刻</div>
-                            <div>• 新增槽位满足检测，所有槽位达标时自动停止洗练</div>
-                            <div>• 修复铭刻后放弃流程遗漏问题</div>
-                            <div>• 修复确认弹窗超时等待过长</div>
                         </div>
                     </div>
                 </div>
