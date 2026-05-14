@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.27
+// @version 1.9.28
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.27';
+    const SCRIPT_VERSION = '1.9.28';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -809,6 +809,12 @@
     // --- 工具函数 ---
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function jitteredSleep(baseMs) {
+        const jitter = baseMs * (0.2 * (Math.random() * 2 - 1));
+        let ms = Math.round(baseMs + jitter);
+        if (ms % 10 === 0) ms += Math.floor(Math.random() * 9) + 1;
+        return sleep(ms);
     }
 
     function escapeHTML(str) {
@@ -2125,7 +2131,7 @@
                     mapInfo = await getTreasureMapItemId();
                 } catch (e) {
                     thLog(`获取藏宝图失败: ${e.message}`, 'error');
-                    await sleep(intervalMs);
+                    await jitteredSleep(intervalMs);
                     continue;
                 }
                 if (!mapInfo) {
@@ -2155,7 +2161,7 @@
                     result = await useTreasureMap(mapInfo.itemId);
                 } catch (e) {
                     thLog(`使用失败: ${e.message}`, 'error');
-                    await sleep(intervalMs);
+                    await jitteredSleep(intervalMs);
                     continue;
                 }
                 if (!window.__thRunning) break;
@@ -2188,7 +2194,7 @@
                         }
                         continue;
                     }
-                    await sleep(intervalMs);
+                    await jitteredSleep(intervalMs);
                     continue;
                 }
 
@@ -2223,7 +2229,7 @@
                 }
 
                 if (!window.__thRunning) break;
-                await sleep(intervalMs);
+                await jitteredSleep(intervalMs);
             }
         } catch (e) {
             thLog(`寻宝异常: ${e.message}`, 'error');
@@ -2953,6 +2959,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.28</div>
+                            <div>• 新增寻宝间隔抖动逻辑，避免固定间隔被检测</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.27</div>
                             <div>• 新增反检测模块，替换全部自动化点击为人类行为模拟</div>
                         </div>
@@ -2962,11 +2972,6 @@
                             <div>• 新增槽位满足检测，所有槽位达标时自动停止洗练</div>
                             <div>• 修复铭刻后放弃流程遗漏问题</div>
                             <div>• 修复确认弹窗超时等待过长</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.25</div>
-                            <div>• 修复高级冥想重复触发问题</div>
-                            <div>• 修复配置面板即时保存遗漏</div>
                         </div>
                     </div>
                 </div>
