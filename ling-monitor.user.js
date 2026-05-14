@@ -811,8 +811,22 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
     function jitteredSleep(baseMs) {
-        const jitter = baseMs * (0.2 * (Math.random() * 2 - 1));
-        let ms = Math.round(baseMs + jitter);
+        let ms;
+        const r = Math.random();
+        if (r < 0.12) {
+            // 12%: 快速操作 (0.4-0.7x)
+            ms = baseMs * (0.4 + Math.random() * 0.3);
+        } else if (r < 0.25) {
+            // 13%: 较长停顿 (2.5-5x)，模拟犹豫/分心
+            ms = baseMs * (2.5 + Math.random() * 2.5);
+        } else if (r < 0.30) {
+            // 5%: 很长停顿 (5-10x)，模拟走神
+            ms = baseMs * (5 + Math.random() * 5);
+        } else {
+            // 70%: 正常范围 (0.7-1.8x)
+            ms = baseMs * (0.7 + Math.random() * 1.1);
+        }
+        ms = Math.round(ms);
         if (ms % 10 === 0) ms += Math.floor(Math.random() * 9) + 1;
         return sleep(ms);
     }
@@ -823,17 +837,66 @@
 
     // --- 反检测: 模拟人类行为 ---
     const _rd = (min, max) => min + Math.random() * (max - min);
+    const _isTouchDevice = 'ontouchstart' in window && window.innerWidth < 1024;
+
+    // 鼠标位置追踪（仅 PC 端）
+    let _cursorX = _isTouchDevice ? 0 : Math.round(window.innerWidth * (0.3 + Math.random() * 0.4));
+    let _cursorY = _isTouchDevice ? 0 : Math.round(window.innerHeight * (0.3 + Math.random() * 0.4));
 
     function _offsetCoord(val) {
         const r = Math.random();
-        if (r < 0.2) return val + _rd(-3, 3);
-        if (r < 0.5) return val + _rd(-1.5, 1.5);
-        return val + _rd(-0.5, 0.5);
+        let result;
+        if (r < 0.2) result = val + _rd(-3, 3);
+        else if (r < 0.5) result = val + _rd(-1.5, 1.5);
+        else result = val + _rd(-0.5, 0.5);
+        // 避免落在整数或半整数附近 (shield click precision 检测阈值 0.05)
+        const nearHalf = Math.abs(result * 2 - Math.round(result * 2)) / 2;
+        if (nearHalf < 0.08) result += (Math.random() < 0.5 ? 1 : -1) * (0.12 + Math.random() * 0.2);
+        return result;
     }
 
-    async function _fireMouse(el, cx, cy, type) {
-        const opts = { clientX: cx, clientY: cy, bubbles: true, cancelable: true };
-        el.dispatchEvent(new MouseEvent(type, opts));
+    function _fireMouse(el, cx, cy, type) {
+        el.dispatchEvent(new MouseEvent(type, { clientX: cx, clientY: cy, bubbles: true, cancelable: true }));
+    }
+
+    // 贝塞尔曲线插值 + 缓动
+    function _bezier(t, p0, p1, p2, p3) {
+        const u = 1 - t;
+        return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3;
+    }
+    function _easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2; }
+
+    // 模拟鼠标沿贝塞尔曲线移动到目标（仅 PC 端）
+    async function _humanMouseMove(toX, toY) {
+        if (_isTouchDevice) return;
+        const fromX = _cursorX, fromY = _cursorY;
+        const dist = Math.hypot(toX - fromX, toY - fromY);
+        if (dist < 3) { _cursorX = toX; _cursorY = toY; return; }
+
+        const spread = dist * 0.3;
+        const cp1x = (fromX + toX)/2 + (Math.random()-0.5)*spread;
+        const cp1y = (fromY + toY)/2 + (Math.random()-0.5)*spread;
+        const cp2x = (fromX + toX)/2 + (Math.random()-0.5)*spread;
+        const cp2y = (fromY + toY)/2 + (Math.random()-0.5)*spread;
+
+        const steps = Math.max(3, Math.min(15, Math.floor(dist / 40)));
+        const stepMs = Math.max(6, Math.min(20, Math.round(8000 / dist)));
+
+        for (let i = 0; i <= steps; i++) {
+            const t = _easeInOut(i / steps);
+            const x = _bezier(t, fromX, cp1x, cp2x, toX);
+            const y = _bezier(t, fromY, cp1y, cp2y, toY);
+            const el = document.elementFromPoint(x, y) || document.documentElement;
+            _fireMouse(el, x, y, 'mousemove');
+            if (i < steps) await sleep(stepMs + Math.round(Math.random() * 8));
+        }
+        _cursorX = toX;
+        _cursorY = toY;
+    }
+
+    function _fireTouch(el, cx, cy, type) {
+        const touch = new Touch({ identifier: 0, target: el, clientX: cx, clientY: cy });
+        el.dispatchEvent(new TouchEvent(type, { touches: type === 'touchend' ? [] : [touch], targetTouches: type === 'touchend' ? [] : [touch], changedTouches: [touch], bubbles: true, cancelable: true }));
     }
 
     async function humanClick(el) {
@@ -841,14 +904,32 @@
         const rect = el.getBoundingClientRect();
         const cx = _offsetCoord(rect.left + rect.width / 2);
         const cy = _offsetCoord(rect.top + rect.height / 2);
-        await _fireMouse(el, cx, cy, 'mouseover');
-        await _fireMouse(el, cx, cy, 'mouseenter');
-        await _fireMouse(el, cx, cy, 'mousemove');
-        await sleep(_rd(40, 120));
-        await _fireMouse(el, cx, cy, 'mousedown');
-        await sleep(_rd(30, 80));
-        await _fireMouse(el, cx, cy, 'mouseup');
-        el.click();
+
+        // PC 端：先移动鼠标
+        if (!_isTouchDevice) {
+            await _humanMouseMove(cx, cy);
+            await _fireMouse(el, cx, cy, 'mouseover');
+            await _fireMouse(el, cx, cy, 'mouseenter');
+            await sleep(_rd(40, 120));
+            await _fireMouse(el, cx, cy, 'mousedown');
+            await sleep(_rd(30, 80));
+            await _fireMouse(el, cx, cy, 'mouseup');
+            el.click();
+        } else {
+            // 触摸设备：touchstart → touchend → (合成) mousedown → mouseup → click
+            _fireTouch(el, cx, cy, 'touchstart');
+            await sleep(_rd(30, 80));
+            _fireTouch(el, cx, cy, 'touchend');
+            await sleep(_rd(80, 200));
+            await _fireMouse(el, cx, cy, 'mouseover');
+            await _fireMouse(el, cx, cy, 'mouseenter');
+            await _fireMouse(el, cx, cy, 'mousemove');
+            await sleep(_rd(20, 50));
+            await _fireMouse(el, cx, cy, 'mousedown');
+            await sleep(_rd(30, 80));
+            await _fireMouse(el, cx, cy, 'mouseup');
+            el.click();
+        }
     }
 
     function humanDelay() { return sleep(_rd(20, 80)); }
@@ -2997,6 +3078,10 @@
                             <div>• 修复铭文洗练达成目标后无条件放弃铭文的问题</div>
                             <div>• 修复有空槽位时洗练误判为全部满足而提前停止</div>
                             <div>• 修复有空槽位时新铭文未被铭刻的问题</div>
+                            <div>• 优化反检测延迟分布为多层级概率模型，降低被检测风险</div>
+                            <div>• 新增贝塞尔曲线鼠标轨迹模拟，PC端点击前自动移动光标</div>
+                            <div>• 新增触摸设备完整 Touch 事件序列支持</div>
+                            <div>• 优化坐标偏移算法，避开整数和半整数检测阈值</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.28</div>
