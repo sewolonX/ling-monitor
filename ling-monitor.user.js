@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.25
+// @version 1.9.26
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.25';
+    const SCRIPT_VERSION = '1.9.26';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -773,6 +773,7 @@
             resultAnimationMs: 1500,
             discardDelayMs: 500,
             autoCloseDialogs: true,
+            autoInscribe: false,
             notifyOnComplete: true,
         },
     };
@@ -2221,6 +2222,8 @@
         startTime: null,
     };
 
+    let cachedInscriptionSlots = [];
+
     function updateInscriptionStatusUI(status) {
         const statusEl = document.getElementById('inscription-status');
         if (!statusEl) return;
@@ -2303,6 +2306,7 @@
                         matches.push({
                             card: result,
                             target: target.stat,
+                            stat: result.stat,
                             quality: result.quality,
                             value: result.value,
                             required: target.minValue || 0
@@ -2336,25 +2340,6 @@
         return { met, matches: uniqueMatches, reason };
     }
 
-    function getBestInscriptionResult(results) {
-        const inscriptionConfig = config.inscription;
-        let best = null;
-        let bestScore = -1;
-
-        for (const r of results) {
-            let score = 0;
-            for (const target of inscriptionConfig.targetStats) {
-                if (r.stat.includes(target.stat)) {
-                    score += r.value * 10;
-                }
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                best = r;
-            }
-        }
-        return best;
-    }
 
     function clickInscriptionTenPull() {
         const buttons = document.querySelectorAll('.modal-action-btn__text');
@@ -2371,26 +2356,34 @@
     function clickInscriptionDiscardAll() {
         const buttons = document.querySelectorAll('button.modal-btn--outline');
         for (const btn of buttons) {
-            if (btn.textContent.trim() === '全部放弃') {
+            const txt = btn.textContent.trim();
+            if (txt === '全部放弃' || txt === '一键放弃') {
                 btn.click();
-                inscriptionLog('已点击「全部放弃」', 'action');
+                inscriptionLog(`已点击「${txt}」`, 'action');
                 return true;
             }
         }
         const allBtns = document.querySelectorAll('button');
         for (const btn of allBtns) {
+            const txt = btn.textContent.trim();
             if (btn.onclick && btn.onclick.toString().includes('discardAllInscriptionsFromTenPull')) {
                 btn.click();
                 inscriptionLog('已点击「全部放弃」（onclick匹配）', 'action');
+                return true;
+            }
+            if (txt === '一键放弃') {
+                btn.click();
+                inscriptionLog('已点击「一键放弃」（文本匹配）', 'action');
                 return true;
             }
         }
         return false;
     }
 
-    async function handleInscriptionDiscardConfirmDialog(timeout = 3000) {
+    async function handleInscriptionDiscardConfirmDialog(timeout = 500) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
+            if (!window.__inscriptionRunning) return false;
             const confirmBtnById = document.getElementById('gameDialogConfirmBtn');
             const cancelBtnById = document.getElementById('gameDialogCancelBtn');
             if (confirmBtnById && cancelBtnById) {
@@ -2415,10 +2408,9 @@
                     return true;
                 }
             }
-            await sleep(200);
+            await sleep(100);
         }
-        inscriptionLog('等待确认弹窗超时', 'warn');
-        return false;
+        return true;
     }
 
     async function waitForInscriptionResultGrid(timeout = 8000) {
@@ -2466,35 +2458,187 @@
         return false;
     }
 
+    function matchesAnyTarget(stat) {
+        return (config.inscription.targetStats || []).some(t => stat.includes(t.stat));
+    }
+
+    function describeMatch(m) {
+        return `${m.quality ? m.quality + '·' : ''}${m.stat}+${m.value}`;
+    }
+
+    function checkAllSlotsMeetTargets(slots) {
+        if (!slots) slots = readMainPanelSlots();
+        if (slots.length === 0) return { met: false, reason: '无法读取槽位' };
+
+        const targets = config.inscription.targetStats;
+        if (!targets || targets.length === 0) return { met: false, reason: '无目标配置' };
+
+        for (const slot of slots) {
+            const matchingTarget = targets.find(t => slot.stat.includes(t.stat));
+            if (!matchingTarget) {
+                return { met: false, reason: `${slot.fullText} 不匹配任何目标` };
+            }
+            if (matchingTarget.minValue && slot.value < matchingTarget.minValue) {
+                return { met: false, reason: `${slot.fullText} 低于要求 ≥${matchingTarget.minValue}` };
+            }
+        }
+
+        return { met: true, reason: '全部槽位已满足目标' };
+    }
+
+    async function inscriptionSleep(ms) {
+        if (!window.__inscriptionRunning) return false;
+        await sleep(ms);
+        return window.__inscriptionRunning;
+    }
+
+    async function clickDetailViewButton() {
+        const container = document.getElementById('customModal') || document;
+        const buttons = container.querySelectorAll('button');
+        for (const btn of buttons) {
+            if (btn.textContent.trim() === '查看详情' && btn.offsetParent !== null) {
+                btn.click();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function readMainPanelSlots() {
+        const slots = [];
+        const container = document.getElementById('customModal') || document;
+        const spans = container.querySelectorAll('span');
+        for (const s of spans) {
+            const txt = s.textContent.trim();
+            const m = txt.match(/^槽位\d+:\s*(.+?)\s*\+(\d+)$/);
+            if (m) {
+                const parts = m[1].split('·');
+                slots.push({
+                    quality: parts.length > 1 ? parts[0] : '',
+                    stat: parts.length > 1 ? parts[1] : parts[0],
+                    value: parseInt(m[2]) || 0,
+                    fullText: txt
+                });
+            }
+        }
+        if (slots.length > 0) return slots;
+        if (cachedInscriptionSlots.length > 0) return cachedInscriptionSlots;
+        return slots;
+    }
+
+    function shouldInscribeFromMainPanel(quality, stat, value) {
+        const slots = readMainPanelSlots();
+        if (slots.length === 0) return { action: 'proceed', reason: '无法读取槽位' };
+
+        for (const slot of slots) {
+            if (!matchesAnyTarget(slot.stat)) {
+                return { action: 'proceed', reason: `${slot.fullText} 不匹配目标，可替换` };
+            }
+        }
+
+        let lowest = slots[0];
+        for (const slot of slots) {
+            if (slot.value < lowest.value) lowest = slot;
+        }
+        if (value > lowest.value) {
+            return { action: 'proceed', reason: `替换最低值 ${lowest.fullText}` };
+        }
+
+        return { action: 'skip', reason: `${describeMatch({quality, stat, value})} 不高于最低值 ${lowest.value}` };
+    }
+
+    async function autoInscribeFromDetailView(quality, stat, value) {
+        const targetNameFull = (quality ? quality + '·' : '') + stat;
+        const items = document.querySelectorAll('.insc-pending-item');
+        for (const item of items) {
+            const nameEl = item.querySelector('.insc-pending-item__name');
+            const valueEl = item.querySelector('.insc-pending-item__value');
+            if (!nameEl || !valueEl) continue;
+            const itemName = nameEl.textContent.trim();
+            const itemValue = parseInt(valueEl.textContent.replace(/[^0-9]/g, '')) || 0;
+            const nameMatch = itemName === targetNameFull || itemName.endsWith('·' + stat);
+            if (nameMatch && itemValue === value) {
+                if (!item.classList.contains('insc-pending-item--expanded')) {
+                    item.click();
+                    if (!window.__inscriptionRunning) return false;
+                    const deadline = Date.now() + 1000;
+                    while (Date.now() < deadline) {
+                        await sleep(100);
+                        if (item.classList.contains('insc-pending-item--expanded')) break;
+                        if (!window.__inscriptionRunning) return false;
+                    }
+                }
+                const slotBtns = item.querySelectorAll('.insc-slot-btn');
+                let targetBtn = null;
+                let targetReason = '';
+                let lowestMatchBtn = null;
+                let lowestMatchValue = Infinity;
+
+                for (const btn of slotBtns) {
+                    const valSpan = btn.querySelector('.insc-slot-btn__value');
+                    if (!valSpan) continue;
+                    const slotText = valSpan.textContent.trim();
+                    if (slotText === '空') {
+                        targetBtn = btn;
+                        targetReason = '空槽位';
+                        break;
+                    }
+                    const m = slotText.match(/[·.](\D+?)\s*\+(\d+)/);
+                    if (!m) continue;
+                    const slotStat = m[1];
+                    const slotVal = parseInt(m[2]) || 0;
+                    if (!matchesAnyTarget(slotStat)) {
+                        targetBtn = btn;
+                        targetReason = `${slotText} 不匹配目标`;
+                        break;
+                    }
+                    if (slotVal < lowestMatchValue) {
+                        lowestMatchValue = slotVal;
+                        lowestMatchBtn = btn;
+                    }
+                }
+                if (!targetBtn && lowestMatchBtn && value > lowestMatchValue) {
+                    targetBtn = lowestMatchBtn;
+                    targetReason = `替换最低值 +${lowestMatchValue}`;
+                }
+                if (targetBtn) {
+                    inscriptionLog(`自动铭刻: 铭刻到槽位 (${targetReason})`, 'action');
+                    targetBtn.click();
+                    if (!window.__inscriptionRunning) return false;
+                    await handleInscriptionDiscardConfirmDialog();
+                    inscriptionLog('自动铭刻: 确认铭刻', 'success');
+                    if (!await inscriptionSleep(500)) return false;
+                    return true;
+                }
+                inscriptionLog('自动铭刻: 无空槽位且无需替换', 'info');
+                return false;
+            }
+        }
+        return false;
+    }
+
     async function performInscriptionDiscard() {
+        if (!window.__inscriptionRunning) return false;
+
         updateInscriptionStatusUI('discarding');
         inscriptionLog('开始放弃流程...', 'action');
 
         const discarded = clickInscriptionDiscardAll();
         if (!discarded) {
-            inscriptionLog('未找到「全部放弃」按钮', 'error');
-            const closeBtn = document.querySelector('.modal-close, [class*="close"]');
-            if (closeBtn) {
-                closeBtn.click();
-                inscriptionLog('已关闭结果面板', 'info');
-            }
+            inscriptionLog('未找到放弃按钮，跳过', 'info');
             updateInscriptionStatusUI('running');
-            return false;
+            return true;
         }
 
-        await sleep(500);
-        const confirmed = await handleInscriptionDiscardConfirmDialog(3000);
-        if (!confirmed) {
-            inscriptionLog('未检测到确认弹窗', 'warn');
-        } else {
-            inscriptionLog('已确认放弃', 'success');
-        }
+        if (!await inscriptionSleep(500)) return false;
+        await handleInscriptionDiscardConfirmDialog();
+        inscriptionLog('已确认放弃', 'success');
 
-        await sleep(300);
+        if (!await inscriptionSleep(300)) return false;
 
         inscriptionStats.discardedCount++;
         inscriptionLog(`已放弃 (累计: ${inscriptionStats.discardedCount}) | 等待 ${config.inscription.discardDelayMs/1000}s`, 'info');
-        await sleep(config.inscription.discardDelayMs);
+        if (!await inscriptionSleep(config.inscription.discardDelayMs)) return false;
 
         updateInscriptionStatusUI('running');
         return true;
@@ -2506,7 +2650,8 @@
             inscriptionLog(`  ✓ ${m.target} +${m.value} (要求≥${m.required})${m.quality ? ' [' + m.quality + ']' : ''}`, 'success');
         });
 
-        const best = getBestInscriptionResult(results);
+        const sortedMatches = [...matches].sort((a, b) => b.value - a.value);
+        const best = sortedMatches[0];
         if (best) {
             inscriptionLog(`  最佳: ${best.stat} +${best.value}${best.quality ? ' [' + best.quality + ']' : ''}`, 'success');
             if (!inscriptionStats.bestResult || best.value > inscriptionStats.bestResult.value) {
@@ -2519,10 +2664,45 @@
 
         if (config.inscription.notifyOnComplete && Notification.permission === 'granted') {
             new Notification('铭文洗练完成', {
-                body: `第${inscriptionStats.totalPulls}次十连达成！${matches.map(m => `${m.target}+${m.value}`).join(', ')}`,
+                body: `第${inscriptionStats.totalPulls}次十连达成！${sortedMatches.map(m => `${m.target}+${m.value}`).join(', ')}`,
                 icon: 'https://ling.muge.info/favicon.ico'
             });
         }
+
+        if (config.inscription.autoInscribe && sortedMatches.length > 0) {
+            let inscribedCount = 0;
+
+            for (const match of sortedMatches) {
+                if (!window.__inscriptionRunning) return;
+
+                const check = shouldInscribeFromMainPanel(match.quality, match.stat, match.value);
+                if (check.action === 'skip') {
+                    inscriptionLog(`自动铭刻: 跳过 ${describeMatch(match)} — ${check.reason}`, 'info');
+                    continue;
+                }
+
+                inscriptionLog(`自动铭刻: 铭刻 ${describeMatch(match)} (${check.reason})`, 'action');
+                const detailClicked = await clickDetailViewButton();
+                if (detailClicked) {
+                    if (!await inscriptionSleep(800)) return;
+                }
+
+                const inscribed = await autoInscribeFromDetailView(match.quality, match.stat, match.value);
+                if (inscribed) {
+                    inscriptionLog(`自动铭刻: 已铭刻 ${describeMatch(match)}`, 'success');
+                    inscribedCount++;
+                    await inscriptionSleep(1500);
+                } else {
+                    inscriptionLog(`自动铭刻: ${describeMatch(match)} 无可用槽位`, 'warn');
+                }
+            }
+
+            if (inscribedCount > 0) {
+                updateInscriptionStatsDisplay();
+            }
+        }
+
+        await performInscriptionDiscard();
     }
 
     async function startInscriptionPulling() {
@@ -2580,6 +2760,16 @@
                     continue;
                 }
 
+                cachedInscriptionSlots = readMainPanelSlots();
+
+                if (inscriptionStats.totalPulls > 0) {
+                    const slotsCheck = checkAllSlotsMeetTargets(cachedInscriptionSlots);
+                    if (slotsCheck.met) {
+                        inscriptionLog(`所有槽位已满足目标，停止`, 'success');
+                        break;
+                    }
+                }
+
                 const clicked = clickInscriptionTenPull();
                 if (!clicked) {
                     inscriptionLog('未找到十连按钮', 'error');
@@ -2610,6 +2800,9 @@
 
                 if (met) {
                     await performInscriptionKeep(results, matches);
+                    if (config.inscription.autoInscribe) {
+                        continue;
+                    }
                     break;
                 } else {
                     inscriptionLog(`无符合 (${reason})，执行放弃`, 'warn');
@@ -2727,6 +2920,13 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.26</div>
+                            <div>• 新增自动铭刻功能，支持多结果按数值降序铭刻</div>
+                            <div>• 新增槽位满足检测，所有槽位达标时自动停止洗练</div>
+                            <div>• 修复铭刻后放弃流程遗漏问题</div>
+                            <div>• 修复确认弹窗超时等待过长</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.25</div>
                             <div>• 修复高级冥想重复触发问题</div>
                             <div>• 修复配置面板即时保存遗漏</div>
@@ -2734,10 +2934,6 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.24</div>
                             <div>• 修复PVP/邀约弹窗关闭后自动按钮未重新勾选</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.23</div>
-                            <div>• 修复PVP遭遇点击按钮选择错误（改用直接选择器点击悄然离去）</div>
                         </div>
                     </div>
                 </div>
@@ -3175,6 +3371,7 @@
             if (el('ic-resultAnim')) config.inscription.resultAnimationMs = parseInt(el('ic-resultAnim').value) || 1500;
             if (el('ic-discardDelay')) config.inscription.discardDelayMs = parseInt(el('ic-discardDelay').value) || 2000;
             if (el('ic-autoDialog')) config.inscription.autoCloseDialogs = el('ic-autoDialog').checked;
+            if (el('ic-autoInscribe')) config.inscription.autoInscribe = el('ic-autoInscribe').checked;
             if (el('ic-notify')) config.inscription.notifyOnComplete = el('ic-notify').checked;
             const targetList = el('ic-target-list');
             if (targetList) {
@@ -3442,6 +3639,10 @@
                     <label class="cfg-label" style="margin:0;">自动关闭弹窗</label>
                 </div>
                 <div class="cfg-row cfg-checkbox-row">
+                    <input id="ic-autoInscribe" type="checkbox" ${cfg.inscription.autoInscribe ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin:0;">自动铭刻</label>
+                </div>
+                <div class="cfg-row cfg-checkbox-row">
                     <input id="ic-notify" type="checkbox" ${cfg.inscription.notifyOnComplete ? 'checked' : ''}>
                     <label class="cfg-label" style="margin:0;">浏览器通知</label>
                 </div>
@@ -3498,7 +3699,7 @@
          'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-useQuantity', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun',
          'cfg-dn-enabled', 'cfg-dn-interval', 'cfg-dn-maxRetries', 'cfg-dn-retryInterval',
          'ic-stopMode', 'ic-maxAttempts', 'ic-resultAnim', 'ic-discardDelay',
-         'ic-autoDialog', 'ic-notify'
+         'ic-autoDialog', 'ic-autoInscribe', 'ic-notify'
         ].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', () => autoSaveConfig());
