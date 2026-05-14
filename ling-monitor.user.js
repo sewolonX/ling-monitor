@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.26
+// @version 1.9.27
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.26';
+    const SCRIPT_VERSION = '1.9.27';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -815,6 +815,38 @@
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // --- 反检测: 模拟人类行为 ---
+    const _rd = (min, max) => min + Math.random() * (max - min);
+
+    function _offsetCoord(val) {
+        const r = Math.random();
+        if (r < 0.2) return val + _rd(-3, 3);
+        if (r < 0.5) return val + _rd(-1.5, 1.5);
+        return val + _rd(-0.5, 0.5);
+    }
+
+    async function _fireMouse(el, cx, cy, type) {
+        const opts = { clientX: cx, clientY: cy, bubbles: true, cancelable: true };
+        el.dispatchEvent(new MouseEvent(type, opts));
+    }
+
+    async function humanClick(el) {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const cx = _offsetCoord(rect.left + rect.width / 2);
+        const cy = _offsetCoord(rect.top + rect.height / 2);
+        await _fireMouse(el, cx, cy, 'mouseover');
+        await _fireMouse(el, cx, cy, 'mouseenter');
+        await _fireMouse(el, cx, cy, 'mousemove');
+        await sleep(_rd(40, 120));
+        await _fireMouse(el, cx, cy, 'mousedown');
+        await sleep(_rd(30, 80));
+        await _fireMouse(el, cx, cy, 'mouseup');
+        el.click();
+    }
+
+    function humanDelay() { return sleep(_rd(20, 80)); }
+
     function createLogFn(logElId) {
         return function (msg, type) {
             const now = new Date();
@@ -855,10 +887,10 @@
         return style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0;
     }
 
-    function clickButtonByText(root, text) {
+    async function clickButtonByText(root, text) {
         const btns = (root || document).querySelectorAll('button');
         for (const btn of btns) {
-            if (btn.textContent.trim() === text) { btn.click(); return true; }
+            if (btn.textContent.trim() === text) { await humanClick(btn); return true; }
         }
         return false;
     }
@@ -868,7 +900,7 @@
         const leaveBtn = overlay?.querySelector('.modal-btn--outline');
         if (leaveBtn) {
             activeLog()(logMsg, 'action');
-            leaveBtn.click();
+            await humanClick(leaveBtn);
             for (let i = 0; i < 10; i++) {
                 await sleep(300);
                 if (!isOverlayVisible(overlayId)) break;
@@ -880,7 +912,8 @@
     }
 
     let _apiCallCounter = 0;
-    function callApi(method, path, body) {
+    async function callApi(method, path, body) {
+        await humanDelay();
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error('API 调用超时')), 10000);
             const eventName = '__monitorApiResult_' + (++_apiCallCounter);
@@ -997,7 +1030,7 @@
         if (isOverlayVisible('pvpEncounterModal')) {
             activeLog()('遭遇PVP，悄然离去', 'action');
             const btn = document.querySelector('#pvpEncounterModal .modal-btn:last-child');
-            if (btn) btn.click();
+            if (btn) await humanClick(btn);
             return;
         }
 
@@ -1012,7 +1045,7 @@
             activeLog()('关闭公告弹窗', 'action');
             const announce = document.getElementById('announceOverlay');
             const closeBtn = announce?.querySelector('.announce-close, .announce-confirm');
-            if (closeBtn) closeBtn.click();
+            if (closeBtn) await humanClick(closeBtn);
             return;
         }
 
@@ -1028,7 +1061,7 @@
             const modal = document.getElementById('gameDialogModal');
             if (modal && !modal.classList.contains('hidden') && modal.dataset.meditationConflict === '1') {
                 const closeBtn = modal.querySelector('.modal-header-close');
-                if (closeBtn) closeBtn.click();
+                if (closeBtn) await humanClick(closeBtn);
                 activeLog()('冥想冲突弹窗，已关闭', 'action');
                 return;
             }
@@ -1121,7 +1154,7 @@
                 if (await isMeditatingViaApi()) {
                     monitorLog('已在冥想中，先收功再高级冥想...', 'info');
                     const stopBtn = document.querySelector('.btn-stop-meditate');
-                    if (stopBtn) stopBtn.click();
+                    if (stopBtn) await humanClick(stopBtn);
                     await waitMeditateStop(monitorLog);
                 }
                 monitorLog('尝试高级冥想...', 'info');
@@ -1133,7 +1166,7 @@
                         monitorLog('高级冥想成功，点击冥想修炼...', 'success');
                         await sleep(500);
                         if ((await isMeditatingViaApi()) === false) {
-                            document.getElementById('meditateBtn')?.click();
+                            await humanClick(document.getElementById('meditateBtn'));
                         }
                         await sleep(500);
                         if (clickButtonByText(document, '收功')) {
@@ -1159,7 +1192,7 @@
                 window.stopAutoExplore('神识不足', false);
             }
             if ((await isMeditatingViaApi()) === false) {
-                document.getElementById('meditateBtn')?.click();
+                await humanClick(document.getElementById('meditateBtn'));
             }
             toggleAutoCheckbox(false);
             window.__monitorRunning = false;
@@ -1256,20 +1289,20 @@
     }
 
     // --- 辅助: 关闭模态对话框 ---
-    function dismissModal() {
+    async function dismissModal() {
         const btns = document.querySelectorAll('.modal-btn--outline');
         for (const btn of btns) {
             if (btn.offsetParent !== null && btn.textContent.trim().includes('取')) {
-                btn.click();
+                await humanClick(btn);
                 break;
             }
         }
     }
 
     // --- 辅助: 点击雇佣护道按钮 ---
-    function clickHireProtector() {
+    async function clickHireProtector() {
         const overlay = document.getElementById('encounterOverlay');
-        if (overlay) clickButtonByText(overlay, '雇佣护道');
+        if (overlay) await clickButtonByText(overlay, '雇佣护道');
     }
 
     // --- 关闭打赏弹窗 ---
@@ -1287,7 +1320,7 @@
                 for (const btn of btns) {
                     const t = btn.textContent.trim();
                     if (t === '取 消' || t === '取消') {
-                        btn.click();
+                        await humanClick(btn);
                         return true;
                     }
                 }
@@ -1452,13 +1485,13 @@
                         const text = btn.textContent.trim();
                         if (wantSolo) {
                             if (text.includes('单独') || text.includes('单 独')) {
-                                btn.click();
+                                await humanClick(btn);
                                 logFn(` 已点击单独雇佣 ${candidate.name}`, 'action');
                                 break;
                             }
                         } else {
                             if (text.includes('协同') || text.includes('协 同')) {
-                                btn.click();
+                                await humanClick(btn);
                                 logFn(` 已点击协同雇佣 ${candidate.name}`, 'action');
                                 break;
                             }
@@ -1548,7 +1581,7 @@
             const sb = document.querySelector('.btn-stop-meditate');
             if (sb && meditating === true) {
                 if (logFn) logFn('检测到重新冥想，再次收功...', 'action');
-                sb.click();
+                await humanClick(sb);
             }
         }
         return true;
@@ -1575,7 +1608,7 @@
             if (await isMeditatingViaApi()) {
                 const stopBtn = document.querySelector('.btn-stop-meditate');
                 if (stopBtn) {
-                    stopBtn.click();
+                    await humanClick(stopBtn);
                     monitorLog('收功中...', 'action');
                     await waitMeditateStop(monitorLog);
                 }
@@ -1611,7 +1644,7 @@
             }
             const medBtn = document.getElementById('meditateBtn');
             if (medBtn) {
-                medBtn.click();
+                await humanClick(medBtn);
                 monitorLog('白天到来，尝试进入冥想...', 'action');
             }
             // 通过接口轮询确认冥想是否真正启动
@@ -1688,7 +1721,7 @@
                 logFn('正在收功...', 'action');
 
                 const stopBtn = document.querySelector('.btn-stop-meditate');
-                if (stopBtn) stopBtn.click();
+                if (stopBtn) await humanClick(stopBtn);
 
                 const stopOk = await waitMeditateStop(logFn);
                 if (!stopOk) return { ok: false };
@@ -1700,7 +1733,7 @@
     }
 
     // --- 逃跑后处理 ---
-    function handleEscapeResult(escaped, reason, mode = 'monitor') {
+    async function handleEscapeResult(escaped, reason, mode = 'monitor') {
         if (!escaped) {
             monitorLog('逃跑失败，继续探索...', 'warn');
             return;
@@ -1711,7 +1744,7 @@
                 const btns = document.querySelectorAll('button');
                 for (const btn of btns) {
                     if (btn.offsetParent !== null && btn.textContent.trim().includes('冥想修炼')) {
-                        btn.click();
+                        await humanClick(btn);
                         break;
                     }
                 }
@@ -1953,7 +1986,7 @@
             if (!bought) {
                 activeLog()('无可购买商品，婉拒告辞', 'info');
                 const leaveBtn = document.getElementById('merchantLeaveBtn');
-                if (leaveBtn) leaveBtn.click();
+                if (leaveBtn) await humanClick(leaveBtn);
             }
 
             for (let i = 0; i < 10; i++) {
@@ -1975,12 +2008,12 @@
         shopping = false;
     }
 
-    function clickBuyItem(itemName) {
+    async function clickBuyItem(itemName) {
         const itemElements = document.querySelectorAll('.merchant-item');
         for (const el of itemElements) {
             const nameEl = el.querySelector('.merchant-item__name');
             if (nameEl && nameEl.textContent.trim() === itemName) {
-                el.querySelector('.merchant-item__buy-btn').click();
+                await humanClick(el.querySelector('.merchant-item__buy-btn'));
                 return;
             }
         }
@@ -1996,7 +2029,7 @@
         let revived = false;
         for (const btn of btns) {
             if (btn.textContent.includes('引渡归来')) {
-                btn.click();
+                await humanClick(btn);
                 revived = true;
                 break;
             }
@@ -2009,7 +2042,7 @@
         const iconBtns = document.querySelectorAll('.btn-icon');
         for (const btn of iconBtns) {
             if (btn.textContent.includes('地图')) {
-                btn.click();
+                await humanClick(btn);
                 break;
             }
         }
@@ -2023,7 +2056,7 @@
                     const nameEl = nodes[3].querySelector('.map-node-name');
                     const mapName = nameEl ? nameEl.textContent.trim() : '第四个地图';
                     monitorLog(`点击第四个地图: ${mapName}...`, 'action');
-                    nodes[3].click();
+                    await humanClick(nodes[3]);
                 }
 
                 for (let i = 0; i < 25; i++) {
@@ -2111,7 +2144,7 @@
                 if (isMeditating) {
                     thLog('正在收功...', 'action');
                     const stopBtn = document.querySelector('.btn-stop-meditate');
-                    if (stopBtn) stopBtn.click();
+                    if (stopBtn) await humanClick(stopBtn);
                     const stopOk = await waitMeditateStop(thLog);
                     if (!stopOk || !window.__thRunning) break;
                     thLog('收功完成', 'success');
@@ -2205,7 +2238,7 @@
             // 寻宝结束后强制触发昼夜校验
             dayNightState.lastCheckTime = 0;
         } else if ((await isMeditatingViaApi()) === false) {
-            document.getElementById('meditateBtn')?.click();
+            await humanClick(document.getElementById('meditateBtn'));
             thLog('已进入冥想', 'success');
         }
         syncStopTHUI();
@@ -2341,24 +2374,24 @@
     }
 
 
-    function clickInscriptionTenPull() {
+    async function clickInscriptionTenPull() {
         const buttons = document.querySelectorAll('.modal-action-btn__text');
         for (const btn of buttons) {
             if (btn.textContent.trim() === '十连灵纹') {
                 const clickTarget = btn.closest('button') || btn;
-                clickTarget.click();
+                await humanClick(clickTarget);
                 return true;
             }
         }
         return false;
     }
 
-    function clickInscriptionDiscardAll() {
+    async function clickInscriptionDiscardAll() {
         const buttons = document.querySelectorAll('button.modal-btn--outline');
         for (const btn of buttons) {
             const txt = btn.textContent.trim();
             if (txt === '全部放弃' || txt === '一键放弃') {
-                btn.click();
+                await humanClick(btn);
                 inscriptionLog(`已点击「${txt}」`, 'action');
                 return true;
             }
@@ -2367,12 +2400,12 @@
         for (const btn of allBtns) {
             const txt = btn.textContent.trim();
             if (btn.onclick && btn.onclick.toString().includes('discardAllInscriptionsFromTenPull')) {
-                btn.click();
+                await humanClick(btn);
                 inscriptionLog('已点击「全部放弃」（onclick匹配）', 'action');
                 return true;
             }
             if (txt === '一键放弃') {
-                btn.click();
+                await humanClick(btn);
                 inscriptionLog('已点击「一键放弃」（文本匹配）', 'action');
                 return true;
             }
@@ -2390,7 +2423,7 @@
                 const cText = confirmBtnById.textContent.trim();
                 if (cText === '确 定' || cText === '确定') {
                     inscriptionLog('确认弹窗，点击「确定」', 'action');
-                    confirmBtnById.click();
+                    await humanClick(confirmBtnById);
                     return true;
                 }
             }
@@ -2404,7 +2437,7 @@
                 if ((cancelText === '取 消' || cancelText === '取消') &&
                     (confirmText === '确 定' || confirmText === '确定')) {
                     inscriptionLog('确认弹窗，点击「确定」', 'action');
-                    confirmBtn.click();
+                    await humanClick(confirmBtn);
                     return true;
                 }
             }
@@ -2497,7 +2530,7 @@
         const buttons = container.querySelectorAll('button');
         for (const btn of buttons) {
             if (btn.textContent.trim() === '查看详情' && btn.offsetParent !== null) {
-                btn.click();
+                await humanClick(btn);
                 return true;
             }
         }
@@ -2559,7 +2592,7 @@
             const nameMatch = itemName === targetNameFull || itemName.endsWith('·' + stat);
             if (nameMatch && itemValue === value) {
                 if (!item.classList.contains('insc-pending-item--expanded')) {
-                    item.click();
+                    await humanClick(item);
                     if (!window.__inscriptionRunning) return false;
                     const deadline = Date.now() + 1000;
                     while (Date.now() < deadline) {
@@ -2603,7 +2636,7 @@
                 }
                 if (targetBtn) {
                     inscriptionLog(`自动铭刻: 铭刻到槽位 (${targetReason})`, 'action');
-                    targetBtn.click();
+                    await humanClick(targetBtn);
                     if (!window.__inscriptionRunning) return false;
                     await handleInscriptionDiscardConfirmDialog();
                     inscriptionLog('自动铭刻: 确认铭刻', 'success');
@@ -2745,7 +2778,7 @@
                         const closeBtns = document.querySelectorAll('.modal-close, .btn-close, [class*="close-btn"]');
                         for (const btn of closeBtns) {
                             if (btn.offsetParent !== null) {
-                                btn.click();
+                                await humanClick(btn);
                                 break;
                             }
                         }
@@ -2920,6 +2953,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.27</div>
+                            <div>• 新增反检测模块，替换全部自动化点击为人类行为模拟</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.26</div>
                             <div>• 新增自动铭刻功能，支持多结果按数值降序铭刻</div>
                             <div>• 新增槽位满足检测，所有槽位达标时自动停止洗练</div>
@@ -2930,10 +2967,6 @@
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.25</div>
                             <div>• 修复高级冥想重复触发问题</div>
                             <div>• 修复配置面板即时保存遗漏</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.24</div>
-                            <div>• 修复PVP/邀约弹窗关闭后自动按钮未重新勾选</div>
                         </div>
                     </div>
                 </div>
