@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.29
+// @version 1.9.30
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.29';
+    const SCRIPT_VERSION = '1.9.30';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1347,9 +1347,16 @@
     function applyExploreMultiplier() {
         const mult = config.general.exploreMultiplier;
         if (!mult || mult <= 1) return;
+        // 按钮组方式（新版 UI）
+        const btn = document.querySelector(`.explore-multiplier-option[data-value="${mult}"]`);
+        if (btn && !btn.classList.contains('active')) {
+            btn.click();
+            monitorLog(`探索倍率已设置为 ${mult}x`, 'info');
+            return;
+        }
+        // 兼容旧版 select 下拉框
         const sel = document.getElementById('exploreMultiplier');
-        if (!sel) return;
-        if (sel.value !== String(mult)) {
+        if (sel && sel.value !== String(mult)) {
             sel.value = String(mult);
             sel.dispatchEvent(new Event('change'));
             document.getElementById('gameAlertOkBtn')?.click();
@@ -3074,6 +3081,10 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.30</div>
+                            <div>• 适配探索倍率新版按钮组UI，保留旧版下拉框兼容</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.29</div>
                             <div>• 修复铭文洗练达成目标后无条件放弃铭文的问题</div>
                             <div>• 修复有空槽位时洗练误判为全部满足而提前停止</div>
@@ -3086,10 +3097,6 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.28</div>
                             <div>• 新增寻宝间隔抖动逻辑，避免固定间隔被检测</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.27</div>
-                            <div>• 新增反检测模块，替换全部自动化点击为人类行为模拟</div>
                         </div>
                     </div>
                 </div>
