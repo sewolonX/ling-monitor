@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.30
+// @version 1.9.31
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.30';
+    const SCRIPT_VERSION = '1.9.31';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -1745,6 +1745,11 @@
             for (let i = 0; i < 10; i++) {
                 await sleep(500);
                 if (!window.__monitorRunning) return;
+                // 遭遇面板出现时立即退出，让主循环处理战斗
+                if (isOverlayVisible('encounterOverlay')) {
+                    dayNightState.lastCheckTime = 0;
+                    return;
+                }
                 if (await isMeditatingViaApi()) {
                     monitorLog('已进入冥想', 'success');
                     updateDayNightIndicator(true);
@@ -3080,6 +3085,10 @@
                 </div>
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
+                        <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.31</div>
+                            <div>• 修复战斗后昼夜检查延迟30秒问题</div>
+                        </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.30</div>
                             <div>• 适配探索倍率新版按钮组UI，保留旧版下拉框兼容</div>
