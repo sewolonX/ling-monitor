@@ -1781,7 +1781,7 @@
         ]);
         if (playerInfo && playerInfo.data) {
             const d = playerInfo.data;
-            if (d.realmStage >= 9 && d.realmLevel >= 6) {
+            if ((d.realmStage === 9 && d.realmLevel >= 6) || d.realmStage > 9) {
                 logFn('渡劫六劫及以上不再获得虚空淬体加成', 'info');
             } else if (d.voidBodyBuffExpire) {
                 const remain = Math.max(0, Math.round((d.voidBodyBuffExpire - Date.now()) / 1000));
@@ -3088,6 +3088,7 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.31</div>
                             <div>• 修复战斗后昼夜检查延迟30秒问题</div>
+                            <div>• 修复虚空淬体加成检测在高阶境界下的误判逻辑</div>
                         </div>
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.30</div>
@@ -3102,10 +3103,6 @@
                             <div>• 新增贝塞尔曲线鼠标轨迹模拟，PC端点击前自动移动光标</div>
                             <div>• 新增触摸设备完整 Touch 事件序列支持</div>
                             <div>• 优化坐标偏移算法，避开整数和半整数检测阈值</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.28</div>
-                            <div>• 新增寻宝间隔抖动逻辑，避免固定间隔被检测</div>
                         </div>
                     </div>
                 </div>
