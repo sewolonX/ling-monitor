@@ -3097,16 +3097,6 @@
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.30</div>
                             <div>• 适配探索倍率新版按钮组UI，保留旧版下拉框兼容</div>
                         </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.29</div>
-                            <div>• 修复铭文洗练达成目标后无条件放弃铭文的问题</div>
-                            <div>• 修复有空槽位时洗练误判为全部满足而提前停止</div>
-                            <div>• 修复有空槽位时新铭文未被铭刻的问题</div>
-                            <div>• 优化反检测延迟分布为多层级概率模型，降低被检测风险</div>
-                            <div>• 新增贝塞尔曲线鼠标轨迹模拟，PC端点击前自动移动光标</div>
-                            <div>• 新增触摸设备完整 Touch 事件序列支持</div>
-                            <div>• 优化坐标偏移算法，避开整数和半整数检测阈值</div>
-                        </div>
                     </div>
                 </div>
                 <div class="mp-bottom-bar">
