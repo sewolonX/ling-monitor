@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.33
+// @version 1.9.34
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -720,7 +720,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.33';
+    const SCRIPT_VERSION = '1.9.34';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -752,6 +752,9 @@
         treasureHunt: {
             batchSize: 0,
             intervalMs: 2000,
+            useRandomInterval: false,
+            intervalMinMs: 1500,
+            intervalMaxMs: 3000,
             useQuantity: 10,
             hireProtector: true,
             checkDaoyun: true,
@@ -821,11 +824,8 @@
         } else if (r < 0.25) {
             // 13%: 较长停顿 (2.5-5x)，模拟犹豫/分心
             ms = baseMs * (2.5 + Math.random() * 2.5);
-        } else if (r < 0.30) {
-            // 5%: 很长停顿 (5-10x)，模拟走神
-            ms = baseMs * (5 + Math.random() * 5);
         } else {
-            // 70%: 正常范围 (0.7-1.8x)
+            // 75%: 正常范围 (0.7-1.8x)
             ms = baseMs * (0.7 + Math.random() * 1.1);
         }
         ms = Math.round(ms);
@@ -2228,7 +2228,13 @@
         thLog('=== 开始自动寻宝 ===', 'success');
         let used = 0, encounterCount = 0, totalXiuwei = 0, totalLingshi = 0;
         const batch = config.treasureHunt.batchSize || Infinity;
-        const intervalMs = config.treasureHunt.intervalMs;
+        const fixedIntervalMs = config.treasureHunt.intervalMs;
+        const useRandomInterval = config.treasureHunt.useRandomInterval;
+        const intervalMinMs = config.treasureHunt.intervalMinMs || 1500;
+        const intervalMaxMs = config.treasureHunt.intervalMaxMs || 3000;
+        const getIntervalMs = useRandomInterval
+            ? () => Math.round(intervalMinMs + Math.random() * (intervalMaxMs - intervalMinMs))
+            : () => fixedIntervalMs;
 
         try {
             while (window.__thRunning && used < batch) {
@@ -2237,7 +2243,7 @@
                     mapInfo = await getTreasureMapItemId();
                 } catch (e) {
                     thLog(`获取藏宝图失败: ${e.message}`, 'error');
-                    await jitteredSleep(intervalMs);
+                    await jitteredSleep(getIntervalMs());
                     continue;
                 }
                 if (!mapInfo) {
@@ -2267,7 +2273,7 @@
                     result = await useTreasureMap(mapInfo.itemId);
                 } catch (e) {
                     thLog(`使用失败: ${e.message}`, 'error');
-                    await jitteredSleep(intervalMs);
+                    await jitteredSleep(getIntervalMs());
                     continue;
                 }
                 if (!window.__thRunning) break;
@@ -2300,7 +2306,7 @@
                         }
                         continue;
                     }
-                    await jitteredSleep(intervalMs);
+                    await jitteredSleep(getIntervalMs());
                     continue;
                 }
 
@@ -2335,7 +2341,7 @@
                 }
 
                 if (!window.__thRunning) break;
-                await jitteredSleep(intervalMs);
+                await jitteredSleep(getIntervalMs());
             }
         } catch (e) {
             thLog(`寻宝异常: ${e.message}`, 'error');
@@ -3099,6 +3105,11 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.34</div>
+                            <div>• 新增寻宝配置"区间间隔"开关，支持在最小最大时间之间随机取值</div>
+                            <div>• 优化 jitteredSleep 随机延迟上限从 10 倍降为 5 倍，移除走神档位</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.33</div>
                             <div>• 新增探索和寻宝配置中的"结束时自动冥想"开关</div>
                             <div>• 将寻宝配置"每批使用数量"标签改为"使用次数"</div>
@@ -3106,10 +3117,6 @@
                         <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.32</div>
                             <div>• 修复战斗后昼夜检查延迟30秒问题</div>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.31</div>
-                            <div>• 修复虚空淬体加成检测在高阶境界下的误判逻辑</div>
                         </div>
                     </div>
                 </div>
@@ -3547,6 +3554,9 @@
             if (el('cfg-th-checkDaoyun')) config.treasureHunt.checkDaoyun = el('cfg-th-checkDaoyun').checked;
             if (el('cfg-th-batchSize')) config.treasureHunt.batchSize = parseInt(el('cfg-th-batchSize').value) || 0;
             if (el('cfg-th-intervalMs')) config.treasureHunt.intervalMs = parseInt(el('cfg-th-intervalMs').value) || 2000;
+            if (el('cfg-th-useRandomInterval')) config.treasureHunt.useRandomInterval = el('cfg-th-useRandomInterval').checked;
+            if (el('cfg-th-intervalMinMs')) config.treasureHunt.intervalMinMs = Math.max(100, parseInt(el('cfg-th-intervalMinMs').value) || 1500);
+            if (el('cfg-th-intervalMaxMs')) config.treasureHunt.intervalMaxMs = Math.max(100, parseInt(el('cfg-th-intervalMaxMs').value) || 3000);
             if (el('cfg-th-useQuantity')) config.treasureHunt.useQuantity = Math.max(1, parseInt(el('cfg-th-useQuantity').value) || 10);
             if (el('cfg-th-hireProtector')) config.treasureHunt.hireProtector = el('cfg-th-hireProtector').checked;
             if (el('cfg-th-autoMeditate')) config.treasureHunt.autoMeditate = el('cfg-th-autoMeditate').checked;
@@ -3763,9 +3773,27 @@
                     <label class="cfg-label">使用次数 (0 = 全部用完)</label>
                     <input id="cfg-th-batchSize" type="number" value="${cfg.treasureHunt.batchSize}">
                 </div>
-                <div class="cfg-row">
+                <div id="cfg-th-fixed-interval-row" class="cfg-row" style="${cfg.treasureHunt.useRandomInterval ? 'display:none;' : ''}">
                     <label class="cfg-label">使用间隔 (毫秒)</label>
                     <input id="cfg-th-intervalMs" type="number" value="${cfg.treasureHunt.intervalMs}">
+                </div>
+                <div class="cfg-row cfg-checkbox-row">
+                    <input id="cfg-th-useRandomInterval" type="checkbox" ${cfg.treasureHunt.useRandomInterval ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin-bottom:0;">启用区间间隔</label>
+                    <span class="cfg-hint">在最小和最大时间之间随机取值</span>
+                </div>
+                <div id="cfg-th-random-interval-details" class="cfg-row" style="${cfg.treasureHunt.useRandomInterval ? '' : 'display:none;'}">
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <div style="flex:1;">
+                            <label class="cfg-label">最小间隔 (毫秒)</label>
+                            <input id="cfg-th-intervalMinMs" type="number" value="${cfg.treasureHunt.intervalMinMs || 1500}" min="100">
+                        </div>
+                        <span style="color:var(--mp-text-muted);margin-top:18px;">~</span>
+                        <div style="flex:1;">
+                            <label class="cfg-label">最大间隔 (毫秒)</label>
+                            <input id="cfg-th-intervalMaxMs" type="number" value="${cfg.treasureHunt.intervalMaxMs || 3000}" min="100">
+                        </div>
+                    </div>
                 </div>
                 <div class="cfg-row">
                     <label class="cfg-label">每次使用数量</label>
@@ -3891,10 +3919,20 @@
             });
         }
 
+        const thRandomIntervalEl = document.getElementById('cfg-th-useRandomInterval');
+        if (thRandomIntervalEl) {
+            thRandomIntervalEl.addEventListener('change', (e) => {
+                const details = document.getElementById('cfg-th-random-interval-details');
+                if (details) details.style.display = e.target.checked ? '' : 'none';
+                const fixedRow = document.getElementById('cfg-th-fixed-interval-row');
+                if (fixedRow) fixedRow.style.display = e.target.checked ? 'none' : '';
+            });
+        }
+
         ['cfg-hireMode', 'cfg-monitor-hireProtector', 'cfg-onNoProtector', 'cfg-afterEscape',
          'cfg-fightThreshold', 'cfg-hirePriceThreshold', 'cfg-highPrice', 'cfg-stonePriority',
          'cfg-itemKeywords', 'cfg-fallback', 'cfg-highLevelMeditate', 'cfg-checkDaoyun', 'cfg-autoMeditate', 'cfg-exploreMultiplier',
-         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-useQuantity', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun', 'cfg-th-autoMeditate',
+         'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-useRandomInterval', 'cfg-th-intervalMinMs', 'cfg-th-intervalMaxMs', 'cfg-th-useQuantity', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun', 'cfg-th-autoMeditate',
          'cfg-dn-enabled', 'cfg-dn-interval', 'cfg-dn-maxRetries', 'cfg-dn-retryInterval',
          'ic-stopMode', 'ic-maxAttempts', 'ic-resultAnim', 'ic-discardDelay',
          'ic-autoDialog', 'ic-autoInscribe', 'ic-notify'
