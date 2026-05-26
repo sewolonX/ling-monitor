@@ -9,8 +9,8 @@
 // @grant GM_addStyle
 // @grant unsafeWindow
 // @run-at document-idle
-// @downloadURL https://gitee.com/nashsci/ling/raw/master/ling-monitor.user.js
-// @updateURL https://gitee.com/nashsci/ling/raw/master/ling-monitor.user.js
+// @downloadURL https://gitee.com/smartbear147/ling-monitor/raw/main/ling-monitor.user.js
+// @updateURL https://gitee.com/smartbear147/ling-monitor/raw/main/ling-monitor.user.js
 // ==/UserScript==
 
 (function () {
