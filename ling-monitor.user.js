@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 灵界助手
 // @namespace https://ling.muge.info
-// @version 1.9.34
+// @version 1.9.35
 // @description 自动雇佣护道者、购买商人物品、死亡复活、关闭打赏弹窗、自动寻宝、铭文洗练，支持手机端拖拽
 // @match https://ling.muge.info/*
 // @grant GM_getValue
@@ -9,8 +9,8 @@
 // @grant GM_addStyle
 // @grant unsafeWindow
 // @run-at document-idle
-// @downloadURL https://gitee.com/smartbear147/ling-monitor/raw/main/ling-monitor.user.js
-// @updateURL https://gitee.com/smartbear147/ling-monitor/raw/main/ling-monitor.user.js
+// @downloadURL https://gitee.com/nashsci/ling/raw/master/ling-monitor.user.js
+// @updateURL https://gitee.com/nashsci/ling/raw/master/ling-monitor.user.js
 // ==/UserScript==
 
 (function () {
@@ -261,6 +261,12 @@
         }
         .mp-status-line.status-running .mp-status-dot {
             animation: mp-pulse-dot 1.5s ease-in-out infinite;
+        }
+        .mp-status-line.status-paused {
+            color: var(--mp-log-warn);
+        }
+        .mp-status-line.status-paused .mp-status-dot {
+            animation: mp-pulse-dot 2s ease-in-out infinite;
         }
         @keyframes mp-pulse-dot {
             0%, 100% { transform: scale(1); opacity: 0.8; }
@@ -720,7 +726,7 @@
     `);
 
     // --- 版本与配置 ---
-    const SCRIPT_VERSION = '1.9.34';
+    const SCRIPT_VERSION = '1.9.35';
 
     const DEFAULT_CONFIG = {
         protectors: {
@@ -759,6 +765,12 @@
             hireProtector: true,
             checkDaoyun: true,
             autoMeditate: true,
+            autoCycle: {
+                enabled: false,
+                runMinutes: 60,
+                restMinutes: 30,
+                refreshPage: false,
+            },
         },
         dayNight: {
             enabled: false,
@@ -781,6 +793,12 @@
             autoInscribe: false,
             notifyOnComplete: true,
         },
+        autoCycle: {
+            enabled: false,
+            runMinutes: 60,
+            restMinutes: 30,
+            refreshPage: false,
+        },
     };
 
     function loadConfig() {
@@ -798,6 +816,7 @@
                     treasureHunt: { ...defaults.treasureHunt, ...(parsed.treasureHunt || {}) },
                     dayNight: { ...defaults.dayNight, ...(parsed.dayNight || {}) },
                     inscription: { ...defaults.inscription, ...(parsed.inscription || {}) },
+                    autoCycle: { ...defaults.autoCycle, ...(parsed.autoCycle || {}) },
                 };
                 result._version = SCRIPT_VERSION;
                 return result;
@@ -1064,6 +1083,19 @@
         transitioning: false,
         meditateRetryCount: 0,
     };
+    const autoCycleState = {
+        runStartTime: 0,
+        restTimer: null,
+        restStartTime: 0,
+        restingSeconds: 0,
+    };
+
+    const thAutoCycleState = {
+        runStartTime: 0,
+        restTimer: null,
+        restStartTime: 0,
+        restingSeconds: 0,
+    };
     const originalShowToast = _uw.showToast;
     _uw.showToast = function (msg) {
         window.__lastToast = msg;
@@ -1241,9 +1273,44 @@
                     window.stopAutoExplore('神识不足', false);
                 }
                 toggleAutoCheckbox(false);
-                window.__monitorRunning = false;
-                syncStopUI();
-                monitorLog('神识不足，自动冥想已关闭，脚本停止', 'warn');
+                // 如果启用了自动循环，转入休息阶段而非完全停止
+                if (config.autoCycle.enabled) {
+                    autoCycleState.restStartTime = Date.now();
+                    autoCycleState.runStartTime = 0;
+                    if (autoCycleState.restTimer) clearTimeout(autoCycleState.restTimer);
+                    const restMs = config.autoCycle.restMinutes * 60 * 1000;
+                    autoCycleState.restTimer = setTimeout(() => {
+                        if (config.autoCycle.refreshPage) {
+                            GM_setValue('ling_resume_intent', 'explore');
+                            location.reload();
+                        } else {
+                            autoCycleState.restTimer = null;
+                            autoCycleState.restStartTime = 0;
+                            autoCycleState.restingSeconds = 0;
+                            autoCycleState.runStartTime = Date.now();
+                            window.__monitorRunning = true;
+                            const btn2 = document.getElementById('monitor-toggle');
+                            const statusEl2 = document.getElementById('monitor-status');
+                            if (btn2) { btn2.textContent = '停止'; btn2.className = 'mp-btn mp-btn-stop'; }
+                            if (statusEl2) {
+                                statusEl2.innerHTML = '<span class="mp-status-dot"></span>运行中<span id="daynight-indicator" class="mp-daynight-indicator" style="display:none;"></span>';
+                                statusEl2.className = 'mp-status-line status-running';
+                            }
+                            startMainLoop();
+                            toggleAutoCheckbox(true);
+                            applyExploreMultiplier();
+                            if (config.dayNight.enabled) updateDayNightIndicator(dayNightState.currentIsDay);
+                            monitorLog('神识恢复，自动循环重新开始（运行' + config.autoCycle.runMinutes + '分钟）', 'success');
+                        }
+                    }, restMs);
+                    window.__monitorRunning = false;
+                    syncStopUI();
+                    monitorLog('神识不足，自动循环转入休息阶段（' + config.autoCycle.restMinutes + '分钟后自动重启）', 'warn');
+                } else {
+                    window.__monitorRunning = false;
+                    syncStopUI();
+                    monitorLog('神识不足，自动冥想已关闭，脚本停止', 'warn');
+                }
                 return;
             }
 
@@ -1295,9 +1362,301 @@
                 await humanClick(document.getElementById('meditateBtn'));
             }
             toggleAutoCheckbox(false);
-            window.__monitorRunning = false;
-            syncStopUI();
-            monitorLog('神识不足，已自动冥想并停止脚本', 'warn');
+            // 如果启用了自动循环，转入休息阶段而非完全停止
+            if (config.autoCycle.enabled) {
+                autoCycleState.restStartTime = Date.now();
+                autoCycleState.runStartTime = 0;
+                if (autoCycleState.restTimer) clearTimeout(autoCycleState.restTimer);
+                const restMs = config.autoCycle.restMinutes * 60 * 1000;
+                autoCycleState.restTimer = setTimeout(() => {
+                    if (config.autoCycle.refreshPage) {
+                        GM_setValue('ling_resume_intent', 'explore');
+                        location.reload();
+                    } else {
+                        autoCycleState.restTimer = null;
+                        autoCycleState.restStartTime = 0;
+                        autoCycleState.restingSeconds = 0;
+                        autoCycleState.runStartTime = Date.now();
+                        window.__monitorRunning = true;
+                        const btn2 = document.getElementById('monitor-toggle');
+                        const statusEl2 = document.getElementById('monitor-status');
+                        if (btn2) { btn2.textContent = '停止'; btn2.className = 'mp-btn mp-btn-stop'; }
+                        if (statusEl2) {
+                            statusEl2.innerHTML = '<span class="mp-status-dot"></span>运行中<span id="daynight-indicator" class="mp-daynight-indicator" style="display:none;"></span>';
+                            statusEl2.className = 'mp-status-line status-running';
+                        }
+                        startMainLoop();
+                        toggleAutoCheckbox(true);
+                        applyExploreMultiplier();
+                        if (config.dayNight.enabled) updateDayNightIndicator(dayNightState.currentIsDay);
+                        monitorLog('神识恢复，自动循环重新开始（运行' + config.autoCycle.runMinutes + '分钟）', 'success');
+                    }
+                }, restMs);
+                window.__monitorRunning = false;
+                syncStopUI();
+                monitorLog('神识不足，自动循环转入休息阶段（' + config.autoCycle.restMinutes + '分钟后自动重启）', 'warn');
+            } else {
+                window.__monitorRunning = false;
+                syncStopUI();
+                monitorLog('神识不足，已自动冥想并停止脚本', 'warn');
+            }
+        }
+    }
+
+    // --- 自动循环功能 ---
+    function checkAutoCycle() {
+        const now = Date.now();
+
+        // 检查探索自动循环
+        if (config.autoCycle.enabled) {
+            const runMinutes = config.autoCycle.runMinutes;
+            const restMinutes = config.autoCycle.restMinutes;
+
+            // 休息中：检查休息是否结束
+            if (autoCycleState.restTimer !== null) {
+                const elapsedRestSeconds = Math.floor((now - autoCycleState.restStartTime) / 1000);
+                const remainingRestSeconds = Math.max(0, (restMinutes * 60) - elapsedRestSeconds);
+
+                if (remainingRestSeconds <= 0) {
+                    // 休息结束
+                    if (config.autoCycle.refreshPage) {
+                        GM_setValue('ling_resume_intent', 'explore');
+                        location.reload();
+                    } else {
+                        clearTimeout(autoCycleState.restTimer);
+                        autoCycleState.restTimer = null;
+                        autoCycleState.restStartTime = 0;
+                        autoCycleState.restingSeconds = 0;
+                        autoCycleState.runStartTime = now;
+
+                        window.__monitorRunning = true;
+                        const btn = document.getElementById('monitor-toggle');
+                        const statusEl = document.getElementById('monitor-status');
+                        if (btn) { btn.textContent = '停止'; btn.className = 'mp-btn mp-btn-stop'; }
+                        if (statusEl) {
+                            statusEl.innerHTML = '<span class="mp-status-dot"></span>运行中<span id="daynight-indicator" class="mp-daynight-indicator" style="display:none;"></span>';
+                            statusEl.className = 'mp-status-line status-running';
+                        }
+                        startMainLoop();
+                        toggleAutoCheckbox(true);
+                        applyExploreMultiplier();
+                        if (config.dayNight.enabled) {
+                            updateDayNightIndicator(dayNightState.currentIsDay);
+                        }
+
+                        monitorLog(`探索休息结束，重新开始（运行${runMinutes}分钟）`, 'success');
+                    }
+                } else {
+                    // 更新休息倒计时显示
+                    if (autoCycleState.restingSeconds !== elapsedRestSeconds) {
+                        autoCycleState.restingSeconds = elapsedRestSeconds;
+                        const statusEl2 = document.getElementById('monitor-status');
+                        if (statusEl2) {
+                            const m = Math.floor(remainingRestSeconds / 60);
+                            const s = remainingRestSeconds % 60;
+                            statusEl2.innerHTML = `<span class="mp-status-dot"></span>休息中 (${m}:${String(s).padStart(2,'0')})`;
+                            statusEl2.className = 'mp-status-line status-paused';
+                        }
+                    }
+                }
+            } else if (window.__monitorRunning) {
+                // 运行中：检查是否需要进入休息
+                if (autoCycleState.runStartTime === 0) {
+                    autoCycleState.runStartTime = now;
+                    monitorLog(`探索自动循环已启动：运行${runMinutes}分钟后冥想休息${restMinutes}分钟`, 'info');
+                }
+
+                const elapsedRunMinutes = Math.floor((now - autoCycleState.runStartTime) / 60000);
+                if (elapsedRunMinutes >= runMinutes) {
+                    // 运行时间到，进入休息
+                    autoCycleState.restStartTime = now;
+                    autoCycleState.runStartTime = 0;
+
+                    window.__monitorRunning = false;
+                    hiring = false;
+                    shopping = false;
+                    toggleAutoCheckbox(false);
+                    removeDayNightIndicator();
+
+                    const btn = document.getElementById('monitor-toggle');
+                    const statusEl = document.getElementById('monitor-status');
+                    if (btn) { btn.textContent = '启动'; btn.className = 'mp-btn mp-btn-start'; }
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span class="mp-status-dot"></span>已停止';
+                        statusEl.className = 'mp-status-line status-stopped';
+                    }
+
+                    if (!window.__thRunning) stopMainLoop();
+
+                    // 进入冥想
+                    if (config.general.autoMeditate !== false) {
+                        const medBtn = document.getElementById('meditateBtn');
+                        if (medBtn) {
+                            humanClick(medBtn).then(() => {
+                                monitorLog(`探索自动循环：运行${runMinutes}分钟到，开始冥想休息${restMinutes}分钟`, 'success');
+                            });
+                        }
+                    }
+
+                    // 设置休息结束定时器
+                    autoCycleState.restTimer = setTimeout(() => {
+                        // 休息结束
+                        if (config.autoCycle.refreshPage) {
+                            GM_setValue('ling_resume_intent', 'explore');
+                            location.reload();
+                        } else {
+                            autoCycleState.restTimer = null;
+                            autoCycleState.restStartTime = 0;
+                            autoCycleState.restingSeconds = 0;
+                            autoCycleState.runStartTime = Date.now();
+
+                            window.__monitorRunning = true;
+                            const btn2 = document.getElementById('monitor-toggle');
+                            const statusEl2 = document.getElementById('monitor-status');
+                            if (btn2) { btn2.textContent = '停止'; btn2.className = 'mp-btn mp-btn-stop'; }
+                            if (statusEl2) {
+                                statusEl2.innerHTML = '<span class="mp-status-dot"></span>运行中<span id="daynight-indicator" class="mp-daynight-indicator" style="display:none;"></span>';
+                                statusEl2.className = 'mp-status-line status-running';
+                            }
+                            startMainLoop();
+                            toggleAutoCheckbox(true);
+                            applyExploreMultiplier();
+                            if (config.dayNight.enabled) {
+                                updateDayNightIndicator(dayNightState.currentIsDay);
+                            }
+
+                            monitorLog(`探索休息结束，重新开始（运行${runMinutes}分钟）`, 'success');
+                        }
+                    }, restMinutes * 60 * 1000);
+                } else if (elapsedRunMinutes % 2 === 0) {
+                    // 更新剩余时间显示
+                    const remaining = runMinutes - elapsedRunMinutes;
+                    const statusEl3 = document.getElementById('monitor-status');
+                    if (statusEl3 && statusEl3.textContent.includes('运行中')) {
+                        const dnIndicator = statusEl3.querySelector('#daynight-indicator');
+                        statusEl3.innerHTML = `<span class="mp-status-dot"></span>运行中 (剩余${remaining}分)${dnIndicator ? dnIndicator.outerHTML : ''}`;
+                    }
+                }
+            }
+        }
+
+        // 检查寻宝自动循环
+        if (config.treasureHunt.autoCycle.enabled) {
+            const thRunMinutes = config.treasureHunt.autoCycle.runMinutes;
+            const thRestMinutes = config.treasureHunt.autoCycle.restMinutes;
+
+            // 休息中：检查休息是否结束
+            if (thAutoCycleState.restTimer !== null) {
+                const elapsedRestSeconds = Math.floor((now - thAutoCycleState.restStartTime) / 1000);
+                const remainingRestSeconds = Math.max(0, (thRestMinutes * 60) - elapsedRestSeconds);
+
+                if (remainingRestSeconds <= 0) {
+                    // 休息结束
+                    if (config.treasureHunt.autoCycle.refreshPage) {
+                        GM_setValue('ling_resume_intent', 'treasure');
+                        location.reload();
+                    } else {
+                        clearTimeout(thAutoCycleState.restTimer);
+                        thAutoCycleState.restTimer = null;
+                        thAutoCycleState.restStartTime = 0;
+                        thAutoCycleState.restingSeconds = 0;
+                        thAutoCycleState.runStartTime = now;
+
+                        window.__thRunning = true;
+                        const thBtn = document.getElementById('treasure-toggle');
+                        const thStatus = document.getElementById('treasure-status');
+                        if (thBtn) { thBtn.textContent = '停止寻宝'; thBtn.className = 'mp-btn mp-btn-treasure-stop'; }
+                        if (thStatus) {
+                            thStatus.innerHTML = '<span class="mp-status-dot"></span>寻宝中';
+                            thStatus.className = 'mp-status-line status-running';
+                        }
+                        startMainLoop();
+                        autoTreasureHunt().catch(e => thLog(`寻宝致命错误: ${e.message}`, 'error'));
+
+                        thLog(`寻宝休息结束，重新开始（运行${thRunMinutes}分钟）`, 'success');
+                    }
+                } else {
+                    // 更新休息倒计时显示
+                    if (thAutoCycleState.restingSeconds !== elapsedRestSeconds) {
+                        thAutoCycleState.restingSeconds = elapsedRestSeconds;
+                        const thStatusEl = document.getElementById('treasure-status');
+                        if (thStatusEl) {
+                            const m = Math.floor(remainingRestSeconds / 60);
+                            const s = remainingRestSeconds % 60;
+                            thStatusEl.innerHTML = `<span class="mp-status-dot"></span>休息中 (${m}:${String(s).padStart(2,'0')})`;
+                            thStatusEl.className = 'mp-status-line status-paused';
+                        }
+                    }
+                }
+            } else if (window.__thRunning) {
+                // 运行中：检查是否需要进入休息
+                if (thAutoCycleState.runStartTime === 0) {
+                    thAutoCycleState.runStartTime = now;
+                    thLog(`寻宝自动循环已启动：运行${thRunMinutes}分钟后冥想休息${thRestMinutes}分钟`, 'info');
+                }
+
+                const elapsedRunMinutes = Math.floor((now - thAutoCycleState.runStartTime) / 60000);
+                if (elapsedRunMinutes >= thRunMinutes) {
+                    // 运行时间到，进入休息
+                    thAutoCycleState.restStartTime = now;
+                    thAutoCycleState.runStartTime = 0;
+
+                    window.__thRunning = false;
+                    const thBtn = document.getElementById('treasure-toggle');
+                    const thStatus = document.getElementById('treasure-status');
+                    if (thBtn) { thBtn.textContent = '寻宝'; thBtn.className = 'mp-btn mp-btn-treasure'; }
+                    if (thStatus) {
+                        thStatus.innerHTML = '<span class="mp-status-dot"></span>已停止';
+                        thStatus.className = 'mp-status-line status-stopped';
+                    }
+
+                    if (!window.__monitorRunning) stopMainLoop();
+
+                    // 进入冥想
+                    if (config.treasureHunt.autoMeditate !== false) {
+                        const medBtn = document.getElementById('meditateBtn');
+                        if (medBtn) {
+                            humanClick(medBtn).then(() => {
+                                thLog(`寻宝自动循环：运行${thRunMinutes}分钟到，开始冥想休息${thRestMinutes}分钟`, 'success');
+                            });
+                        }
+                    }
+
+                    // 设置休息结束定时器
+                    thAutoCycleState.restTimer = setTimeout(() => {
+                        // 休息结束
+                        if (config.treasureHunt.autoCycle.refreshPage) {
+                            GM_setValue('ling_resume_intent', 'treasure');
+                            location.reload();
+                        } else {
+                            thAutoCycleState.restTimer = null;
+                            thAutoCycleState.restStartTime = 0;
+                            thAutoCycleState.restingSeconds = 0;
+                            thAutoCycleState.runStartTime = Date.now();
+
+                            window.__thRunning = true;
+                            const thBtn2 = document.getElementById('treasure-toggle');
+                            const thStatus2 = document.getElementById('treasure-status');
+                            if (thBtn2) { thBtn2.textContent = '停止寻宝'; thBtn2.className = 'mp-btn mp-btn-treasure-stop'; }
+                            if (thStatus2) {
+                                thStatus2.innerHTML = '<span class="mp-status-dot"></span>寻宝中';
+                                thStatus2.className = 'mp-status-line status-running';
+                            }
+                            startMainLoop();
+                            autoTreasureHunt().catch(e => thLog(`寻宝致命错误: ${e.message}`, 'error'));
+
+                            thLog(`寻宝休息结束，重新开始（运行${thRunMinutes}分钟）`, 'success');
+                        }
+                    }, thRestMinutes * 60 * 1000);
+                } else if (elapsedRunMinutes % 2 === 0) {
+                    // 更新剩余时间显示
+                    const remaining = thRunMinutes - elapsedRunMinutes;
+                    const thStatusEl = document.getElementById('treasure-status');
+                    if (thStatusEl && thStatusEl.textContent.includes('寻宝中')) {
+                        thStatusEl.innerHTML = `<span class="mp-status-dot"></span>寻宝中 (剩余${remaining}分)`;
+                    }
+                }
+            }
         }
     }
 
@@ -1326,6 +1685,7 @@
             if (_loopBusy) return;
             _loopBusy = true;
             try {
+                if (config.autoCycle.enabled || config.treasureHunt.autoCycle.enabled) checkAutoCycle();
                 if (!isRunning()) return;
                 await checkAllPopups();
                 await mergeInventory();
@@ -3105,6 +3465,13 @@
                 <div id="tab-changelog" class="mp-tab-content">
                     <div id="changelog-list" style="padding:8px 10px;font-size:12px;line-height:1.8;color:var(--mp-text);">
                         <div style="margin-bottom:12px;">
+                            <div style="color:var(--mp-accent);font-weight:bold;">v1.9.35</div>
+                            <div>• 新增自动循环功能：探索/寻宝运行指定分钟后自动停止冥想，休息指定分钟后自动重启</div>
+                            <div>• 自动循环支持"同时控制寻宝功能"开关，开启后寻宝随探索一起启停</div>
+                            <div>• 自动循环状态在状态栏显示运行剩余时间和休息倒计时</div>
+                            <div>• 配置面板新增自动循环设置项（启用/运行分钟/休息分钟/控制寻宝）</div>
+                        </div>
+                        <div style="margin-bottom:12px;">
                             <div style="color:var(--mp-accent);font-weight:bold;">v1.9.34</div>
                             <div>• 新增寻宝配置"区间间隔"开关，支持在最小最大时间之间随机取值</div>
                             <div>• 优化 jitteredSleep 随机延迟上限从 10 倍降为 5 倍，移除走神档位</div>
@@ -3320,6 +3687,24 @@
                 syncStopTHUI();
             }
             stopMainLoop();
+
+            // 重置自动循环状态
+            if (autoCycleState.restTimer) {
+                clearTimeout(autoCycleState.restTimer);
+                autoCycleState.restTimer = null;
+            }
+            autoCycleState.runStartTime = 0;
+            autoCycleState.restStartTime = 0;
+            autoCycleState.restingSeconds = 0;
+
+            if (thAutoCycleState.restTimer) {
+                clearTimeout(thAutoCycleState.restTimer);
+                thAutoCycleState.restTimer = null;
+            }
+            thAutoCycleState.runStartTime = 0;
+            thAutoCycleState.restStartTime = 0;
+            thAutoCycleState.restingSeconds = 0;
+
             panel.style.display = 'none';
             monitorLog('面板已关闭，刷新页面可重新加载', 'info');
             e.stopPropagation();
@@ -3371,6 +3756,16 @@
                 dayNightState.currentIsDay = null;
                 dayNightState.transitioning = false;
                 removeDayNightIndicator();
+
+                // 重置自动循环状态
+                if (autoCycleState.restTimer) {
+                    clearTimeout(autoCycleState.restTimer);
+                    autoCycleState.restTimer = null;
+                }
+                autoCycleState.runStartTime = 0;
+                autoCycleState.restStartTime = 0;
+                autoCycleState.restingSeconds = 0;
+
                 if (config.general.autoMeditate !== false) {
                     const medBtn = document.getElementById('meditateBtn');
                     if (medBtn) {
@@ -3396,6 +3791,16 @@
                     dayNightState.lastCheckTime = 0;
                 }
                 if (!window.__monitorRunning) stopMainLoop();
+
+                // 重置寻宝自动循环状态
+                if (thAutoCycleState.restTimer) {
+                    clearTimeout(thAutoCycleState.restTimer);
+                    thAutoCycleState.restTimer = null;
+                }
+                thAutoCycleState.runStartTime = 0;
+                thAutoCycleState.restStartTime = 0;
+                thAutoCycleState.restingSeconds = 0;
+
                 thLog('已停止寻宝', 'warn');
             } else {
                 window.__thRunning = true;
@@ -3571,6 +3976,14 @@
             if (el('ic-autoDialog')) config.inscription.autoCloseDialogs = el('ic-autoDialog').checked;
             if (el('ic-autoInscribe')) config.inscription.autoInscribe = el('ic-autoInscribe').checked;
             if (el('ic-notify')) config.inscription.notifyOnComplete = el('ic-notify').checked;
+            if (el('cfg-autoCycle-enabled')) config.autoCycle.enabled = el('cfg-autoCycle-enabled').checked;
+            if (el('cfg-autoCycle-runMinutes')) config.autoCycle.runMinutes = parseInt(el('cfg-autoCycle-runMinutes').value) || 60;
+            if (el('cfg-autoCycle-restMinutes')) config.autoCycle.restMinutes = parseInt(el('cfg-autoCycle-restMinutes').value) || 30;
+            if (el('cfg-autoCycle-refreshPage')) config.autoCycle.refreshPage = el('cfg-autoCycle-refreshPage').checked;
+            if (el('cfg-th-autoCycle-enabled')) config.treasureHunt.autoCycle.enabled = el('cfg-th-autoCycle-enabled').checked;
+            if (el('cfg-th-autoCycle-runMinutes')) config.treasureHunt.autoCycle.runMinutes = parseInt(el('cfg-th-autoCycle-runMinutes').value) || 60;
+            if (el('cfg-th-autoCycle-restMinutes')) config.treasureHunt.autoCycle.restMinutes = parseInt(el('cfg-th-autoCycle-restMinutes').value) || 30;
+            if (el('cfg-th-autoCycle-refreshPage')) config.treasureHunt.autoCycle.refreshPage = el('cfg-th-autoCycle-refreshPage').checked;
             const targetList = el('ic-target-list');
             if (targetList) {
                 const rows = targetList.querySelectorAll('.affix-row');
@@ -3626,7 +4039,7 @@
         const panel = document.createElement('div');
         panel.id = isInscription ? 'inscription-config-panel' : 'config-panel';
         const cfg = JSON.parse(JSON.stringify(config));
-    
+
         // 1. 在模板外部构建 protectorSectionHTML
         let protectorSectionHTML = '';
         if (isTreasure) {
@@ -3742,6 +4155,32 @@
                         <span class="cfg-hint">冥想失败后多久重试</span>
                     </div>
                 </div>
+            </div>
+
+            <div class="cfg-section">
+                <div class="cfg-section-label">自动循环</div>
+                <div class="cfg-row cfg-checkbox-row">
+                    <input id="cfg-autoCycle-enabled" type="checkbox" ${cfg.autoCycle.enabled ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin-bottom:0;">启用自动循环</label>
+                    <span class="cfg-hint">自动停止并冥想，自动启动</span>
+                </div>
+                <div id="cfg-autoCycle-settings" style="${cfg.autoCycle.enabled ? '' : 'display:none;'}">
+                    <div class="cfg-row">
+                        <label class="cfg-label">运行时间 (分钟)</label>
+                        <input id="cfg-autoCycle-runMinutes" type="number" value="${cfg.autoCycle.runMinutes}" min="1" max="600">
+                        <span class="cfg-hint">探索运行时间</span>
+                    </div>
+                    <div class="cfg-row">
+                        <label class="cfg-label">休息时间 (分钟)</label>
+                        <input id="cfg-autoCycle-restMinutes" type="number" value="${cfg.autoCycle.restMinutes}" min="1" max="600">
+                        <span class="cfg-hint">冥想休息时间</span>
+                    </div>
+                    <div class="cfg-row cfg-checkbox-row">
+                        <input id="cfg-autoCycle-refreshPage" type="checkbox" ${cfg.autoCycle.refreshPage ? 'checked' : ''}>
+                        <label class="cfg-label" style="margin-bottom:0;">刷新网页</label>
+                        <span class="cfg-hint">休息结束后先刷新网页再重启</span>
+                    </div>
+                </div>
             </div>`}
 
             ${(!isTreasure && !isInscription) ? `
@@ -3809,6 +4248,32 @@
                     <label class="cfg-label" style="margin-bottom:0;">结束时自动冥想</label>
                     <span class="cfg-hint">寻宝结束后自动进入冥想</span>
                 </div>
+            </div>
+
+            <div class="cfg-section">
+                <div class="cfg-section-label">寻宝自动循环</div>
+                <div class="cfg-row cfg-checkbox-row">
+                    <input id="cfg-th-autoCycle-enabled" type="checkbox" ${cfg.treasureHunt.autoCycle.enabled ? 'checked' : ''}>
+                    <label class="cfg-label" style="margin-bottom:0;">启用自动循环</label>
+                    <span class="cfg-hint">自动停止并冥想，自动启动</span>
+                </div>
+                <div id="cfg-th-autoCycle-settings" style="${cfg.treasureHunt.autoCycle.enabled ? '' : 'display:none;'}">
+                    <div class="cfg-row">
+                        <label class="cfg-label">运行时间 (分钟)</label>
+                        <input id="cfg-th-autoCycle-runMinutes" type="number" value="${cfg.treasureHunt.autoCycle.runMinutes}" min="1" max="600">
+                        <span class="cfg-hint">寻宝运行时间</span>
+                    </div>
+                    <div class="cfg-row">
+                        <label class="cfg-label">休息时间 (分钟)</label>
+                        <input id="cfg-th-autoCycle-restMinutes" type="number" value="${cfg.treasureHunt.autoCycle.restMinutes}" min="1" max="600">
+                        <span class="cfg-hint">冥想休息时间</span>
+                    </div>
+                    <div class="cfg-row cfg-checkbox-row">
+                        <input id="cfg-th-autoCycle-refreshPage" type="checkbox" ${cfg.treasureHunt.autoCycle.refreshPage ? 'checked' : ''}>
+                        <label class="cfg-label" style="margin-bottom:0;">刷新网页</label>
+                        <span class="cfg-hint">休息结束后先刷新网页再重启</span>
+                    </div>
+                </div>
             </div>` : ''}
 
             ${isInscription ? `<div class="cfg-section">
@@ -3873,16 +4338,16 @@
                     <label class="cfg-label" style="margin:0;">浏览器通知</label>
                 </div>
             </div>` : ''}
-    
+
             <div class="cfg-bottom-bar">
                 <button id="cfg-reset" class="cfg-btn cfg-btn-reset">重置默认</button>
             </div>
         `;
-    
+
         const monitorPanel = document.getElementById('monitor-panel');
         monitorPanel.appendChild(panel);
         configPanelEl = panel;
-    
+
         panel.querySelector('.cfg-close').addEventListener('click', () => {
             autoSaveConfig();
             if (window.__inscriptionRunning) {
@@ -3934,6 +4399,8 @@
          'cfg-itemKeywords', 'cfg-fallback', 'cfg-highLevelMeditate', 'cfg-checkDaoyun', 'cfg-autoMeditate', 'cfg-exploreMultiplier',
          'cfg-th-batchSize', 'cfg-th-intervalMs', 'cfg-th-useRandomInterval', 'cfg-th-intervalMinMs', 'cfg-th-intervalMaxMs', 'cfg-th-useQuantity', 'cfg-th-hireProtector', 'cfg-th-checkDaoyun', 'cfg-th-autoMeditate',
          'cfg-dn-enabled', 'cfg-dn-interval', 'cfg-dn-maxRetries', 'cfg-dn-retryInterval',
+         'cfg-autoCycle-enabled', 'cfg-autoCycle-runMinutes', 'cfg-autoCycle-restMinutes', 'cfg-autoCycle-refreshPage',
+         'cfg-th-autoCycle-enabled', 'cfg-th-autoCycle-runMinutes', 'cfg-th-autoCycle-restMinutes', 'cfg-th-autoCycle-refreshPage',
          'ic-stopMode', 'ic-maxAttempts', 'ic-resultAnim', 'ic-discardDelay',
          'ic-autoDialog', 'ic-autoInscribe', 'ic-notify'
         ].forEach(id => {
@@ -3945,6 +4412,22 @@
         if (dnEnabled) {
             dnEnabled.addEventListener('change', (e) => {
                 const settings = document.getElementById('cfg-dn-settings');
+                if (settings) settings.style.display = e.target.checked ? '' : 'none';
+            });
+        }
+
+        const autoCycleEnabled = document.getElementById('cfg-autoCycle-enabled');
+        if (autoCycleEnabled) {
+            autoCycleEnabled.addEventListener('change', (e) => {
+                const settings = document.getElementById('cfg-autoCycle-settings');
+                if (settings) settings.style.display = e.target.checked ? '' : 'none';
+            });
+        }
+
+        const thAutoCycleEnabled = document.getElementById('cfg-th-autoCycle-enabled');
+        if (thAutoCycleEnabled) {
+            thAutoCycleEnabled.addEventListener('change', (e) => {
+                const settings = document.getElementById('cfg-th-autoCycle-settings');
                 if (settings) settings.style.display = e.target.checked ? '' : 'none';
             });
         }
@@ -4075,4 +4558,28 @@
 
     // ==================== 初始化 ====================
     createPanel();
+
+    // --- 自动循环刷新恢复 ---
+    (function resumeAfterReload() {
+        const intent = GM_getValue('ling_resume_intent', null);
+        if (!intent) return;
+        GM_setValue('ling_resume_intent', null);
+
+        // 等待面板渲染完成
+        const tryResume = () => {
+            const monitorToggle = document.getElementById('monitor-toggle');
+            const treasureToggle = document.getElementById('treasure-toggle');
+            if (!monitorToggle || !treasureToggle) {
+                setTimeout(tryResume, 200);
+                return;
+            }
+
+            if (intent === 'explore') {
+                monitorToggle.click();
+            } else if (intent === 'treasure') {
+                treasureToggle.click();
+            }
+        };
+        setTimeout(tryResume, 500);
+    })();
 })();
